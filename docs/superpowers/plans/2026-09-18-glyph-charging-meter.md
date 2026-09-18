@@ -999,7 +999,7 @@ object MeterRenderer {
 - [ ] **Step 4: Запустить тесты**
 
 Run: `./gradlew :core:layout:test`
-Expected: PASS, все девять тестов `MeterRendererTest`.
+Expected: PASS, все десять тестов `MeterRendererTest`.
 
 - [ ] **Step 5: Commit**
 
