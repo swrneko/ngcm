@@ -48,6 +48,17 @@ class GlyphAccessManagerTest {
     }
 
     @Test
+    fun `an unsupported phone is reported even when it does not need debug mode`() {
+        val state = manager(
+            writers = emptyList(),
+            supported = false,
+            needsDebugMode = false,
+        ).evaluate()
+
+        assertEquals(GlyphAccessState.UNSUPPORTED_DEVICE, state)
+    }
+
+    @Test
     fun `debug mode already on without a writer counts as working`() {
         val writer = StubWriter(isAvailable = false, debugOn = true, canEnable = false)
 
@@ -74,6 +85,18 @@ class GlyphAccessManagerTest {
 
         assertEquals(GlyphAccessState.NEEDS_SETUP, state)
         assertEquals(0, writer.enableCalls)
+    }
+
+    @Test
+    fun `a writer is left untouched once an earlier one has already succeeded`() {
+        val first = StubWriter(isAvailable = true, debugOn = false, canEnable = true)
+        val second = StubWriter(isAvailable = true, debugOn = false, canEnable = true)
+
+        val state = manager(listOf(first, second)).evaluate()
+
+        assertEquals(GlyphAccessState.MANAGED_BY_APP, state)
+        assertEquals(1, first.enableCalls)
+        assertEquals(0, second.enableCalls)
     }
 
     @Test
