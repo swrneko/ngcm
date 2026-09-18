@@ -18,6 +18,7 @@ android {
 }
 dependencies {
     api(project(":core:model"))
+    api(project(":core:layout"))
     // Kept compileOnly: AGP 9.4 no longer allows a direct local .aar file dependency to be
     // packaged inside another AAR (bundleDebugAar fails with "Direct local .aar file
     // dependencies are not supported when building an AAR"). The application module
