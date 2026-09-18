@@ -18,8 +18,6 @@ data class ChargingState(
 ) {
     companion object {
 
-        val Unknown = ChargingState(isCharging = false, level = 0f, source = PowerSource.NONE)
-
         fun fromBatteryIntent(intent: Intent): ChargingState {
             val rawLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
