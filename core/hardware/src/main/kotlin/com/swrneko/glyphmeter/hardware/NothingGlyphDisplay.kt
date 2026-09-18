@@ -3,7 +3,6 @@ package com.swrneko.glyphmeter.hardware
 import android.content.Context
 import android.util.Log
 import com.nothing.ketchum.Glyph
-import com.nothing.ketchum.GlyphException
 import com.nothing.ketchum.GlyphManager
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.model.GlyphFrameData
@@ -38,6 +37,10 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
 
     override suspend fun connect(layout: DeviceLayout): Result<Unit> {
         if (sessionOpen && this.layout == layout) return Result.success(Unit)
+        // Reconnecting with a different layout must not stack a second session on top
+        // of the one already open: close it first so the SDK never sees two openSession
+        // calls without a closeSession between them.
+        if (sessionOpen) disconnect()
 
         this.layout = layout
         val deviceId = resolveDeviceId(layout)
@@ -58,6 +61,13 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
                         _capability.value = RenderCapability.UNAVAILABLE
                     }
                 })
+                // If the caller's coroutine is cancelled (navigated away) or the timeout
+                // below fires, the callback registered above must not stay bound forever:
+                // unInit() unregisters it from the GlyphManager singleton.
+                continuation.invokeOnCancellation {
+                    runCatching { instance.unInit() }
+                        .onFailure { Log.w(TAG, "unInit after cancelled connect failed", it) }
+                }
             }
         } ?: return fail("timed out waiting for the Glyph service")
 
@@ -73,7 +83,7 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
             sessionOpen = true
             _capability.value = RenderCapability.PER_SEGMENT
             Result.success(Unit)
-        } catch (e: GlyphException) {
+        } catch (e: Throwable) {
             fail("openSession failed: ${e.message}")
         }
     }
@@ -111,8 +121,7 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
 
     private fun renderStepped(manager: GlyphManager, frame: GlyphFrameData, layout: DeviceLayout) {
         val meter = layout.meterZone.indices
-        val lit = meter.count { frame[it] > 0 }
-        val percent = (lit * 100) / meter.size
+        val percent = steppedMeterPercent(meterSize = meter.size, litCount = meter.count { frame[it] > 0 })
 
         try {
             val builder = manager.glyphFrameBuilder
@@ -130,10 +139,15 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
     }
 
     override fun disconnect() {
-        runCatching {
-            if (sessionOpen) manager?.closeSession()
-            manager?.unInit()
-        }.onFailure { Log.w(TAG, "disconnect failed", it) }
+        // unInit() must run even when closeSession() throws (it declares GlyphException):
+        // otherwise a failed close would leave the service binding and callback registered
+        // forever. Each step gets its own runCatching so a failure in one never skips the other.
+        if (sessionOpen) {
+            runCatching { manager?.closeSession() }
+                .onFailure { Log.w(TAG, "closeSession failed", it) }
+        }
+        runCatching { manager?.unInit() }
+            .onFailure { Log.w(TAG, "unInit failed", it) }
 
         sessionOpen = false
         manager = null
@@ -152,3 +166,14 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
         else -> null
     }
 }
+
+/**
+ * Percentage of the meter zone considered lit, used by the stepped fallback renderer.
+ *
+ * Pulled out as a plain top-level function (no Glyph SDK types involved) so it stays
+ * unit-testable even though [NothingGlyphDisplay] itself is not: an empty meter zone
+ * must yield 0 rather than divide by zero, since this path is the last line of defense
+ * and must never throw.
+ */
+internal fun steppedMeterPercent(meterSize: Int, litCount: Int): Int =
+    if (meterSize == 0) 0 else (litCount * 100) / meterSize
