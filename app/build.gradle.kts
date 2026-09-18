@@ -31,6 +31,11 @@ android {
             isMinifyEnabled = false
         }
     }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 dependencies {
     implementation(project(":core:model"))
