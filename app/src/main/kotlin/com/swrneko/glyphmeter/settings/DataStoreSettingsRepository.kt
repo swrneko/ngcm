@@ -1,25 +1,28 @@
 package com.swrneko.glyphmeter.settings
 
-import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.swrneko.glyphmeter.model.Light
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.settingsDataStore by preferencesDataStore(name = "glyph_settings")
-
+/**
+ * Reads and writes [GlyphSettings] through an injected [DataStore], rather than reaching for
+ * a context-bound [androidx.datastore.preferences.preferencesDataStore] delegate itself. This
+ * keeps the class free of Android context handling and makes it trivial to point at a
+ * temporary, disposable store in tests (see [DataStoreSettingsRepositoryTest]). Production
+ * wiring of the real on-device store lives in [SettingsModule].
+ */
 @Singleton
 class DataStoreSettingsRepository @Inject constructor(
-    private val context: Context,
+    private val dataStore: DataStore<Preferences>,
 ) : SettingsRepository {
 
     private object Keys {
@@ -35,10 +38,10 @@ class DataStoreSettingsRepository @Inject constructor(
     }
 
     override val settings: Flow<GlyphSettings> =
-        context.settingsDataStore.data.map { it.toSettings() }
+        dataStore.data.map { it.toSettings() }
 
     override suspend fun update(transform: (GlyphSettings) -> GlyphSettings) {
-        context.settingsDataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             val updated = transform(preferences.toSettings())
 
             preferences[Keys.Enabled] = updated.enabled

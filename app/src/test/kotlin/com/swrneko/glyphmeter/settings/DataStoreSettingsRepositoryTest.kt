@@ -1,113 +1,87 @@
 package com.swrneko.glyphmeter.settings
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.swrneko.glyphmeter.model.Light
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
 
 /**
- * Tests for [DataStoreSettingsRepository] invariants.
- *
- * This test class exercises the validation and default-fallback logic that
- * [DataStoreSettingsRepository] implements when reading and writing settings.
+ * Exercises [DataStoreSettingsRepository] through its public [SettingsRepository] interface
+ * (`settings`, `update`), backed by a real [DataStore] rooted in a temporary file per test.
+ * Nothing here is mocked or duplicated from the class under test.
  */
 class DataStoreSettingsRepositoryTest {
 
-    /**
-     * Test: Brightness clamping to maximum.
-     * When a value above Light.MAX is written, it must be clamped to Light.MAX when stored.
-     */
+    @get:Rule
+    val tempFolder = TemporaryFolder()
+
+    private var nextFileId = 0
+
+    /** Every call gets its own backing file: the [preferencesDataStore] delegate this mirrors
+     * cannot be recreated for the same file within one process, and a JUnit [TemporaryFolder]
+     * only clears itself between tests, not between calls made within one test. */
+    private fun newDataStore(): DataStore<Preferences> {
+        val file = File(tempFolder.root, "settings_${nextFileId++}.preferences_pb")
+        return PreferenceDataStoreFactory.create { file }
+    }
+
+    private fun newRepository(dataStore: DataStore<Preferences> = newDataStore()) =
+        DataStoreSettingsRepository(dataStore)
+
     @Test
     fun `brightness above max is clamped to max on write`() = runTest {
-        val repository = FakeSettingsRepository()
-        val newSettings = GlyphSettings.Default.copy(brightness = Light.MAX + 1000)
+        val repository = newRepository()
 
-        // Manually apply the same clamping logic as DataStoreSettingsRepository does
-        val clampedBrightness = newSettings.brightness.coerceIn(0, Light.MAX)
+        repository.update { it.copy(brightness = Light.MAX + 1000) }
 
-        repository.update { it.copy(brightness = clampedBrightness) }
-        val stored = repository.settings.first()
-
-        assertEquals(Light.MAX, stored.brightness)
+        assertEquals(Light.MAX, repository.settings.first().brightness)
     }
 
-    /**
-     * Test: Brightness clamping to zero.
-     * When a negative brightness is written, it must be clamped to 0.
-     */
     @Test
-    fun `brightness below zero is clamped to zero on write`() = runTest {
-        val repository = FakeSettingsRepository()
-        val newSettings = GlyphSettings.Default.copy(brightness = -100)
+    fun `brightness below zero is clamped to zero, not to the visibility floor`() = runTest {
+        val repository = newRepository()
 
-        val clampedBrightness = newSettings.brightness.coerceIn(0, Light.MAX)
+        repository.update { it.copy(brightness = -100) }
 
-        repository.update { it.copy(brightness = clampedBrightness) }
-        val stored = repository.settings.first()
-
-        assertEquals(0, stored.brightness)
+        // Zero at the storage layer means "segment off". Clamping user input to the
+        // visible minimum is the settings screen's job, not the repository's.
+        assertEquals(0, repository.settings.first().brightness)
     }
 
-    /**
-     * Test: Show duration clamping to non-negative.
-     * When a negative showDurationMillis is written, it must be clamped to 0.
-     */
     @Test
     fun `negative show duration is clamped to zero on write`() = runTest {
-        val repository = FakeSettingsRepository()
-        val newSettings = GlyphSettings.Default.copy(showDurationMillis = -5000)
+        val repository = newRepository()
 
-        val clampedDuration = newSettings.showDurationMillis.coerceAtLeast(0)
+        repository.update { it.copy(showDurationMillis = -5000) }
 
-        repository.update { it.copy(showDurationMillis = clampedDuration) }
-        val stored = repository.settings.first()
-
-        assertEquals(0L, stored.showDurationMillis)
+        assertEquals(0L, repository.settings.first().showDurationMillis)
     }
 
-    /**
-     * Test: Repeat step clamping to minimum.
-     * When repeatStepPercent is below 1, it must be clamped to 1.
-     */
     @Test
-    fun `repeat step below 1 is clamped to 1 on write`() = runTest {
-        val repository = FakeSettingsRepository()
-        val newSettings = GlyphSettings.Default.copy(repeatStepPercent = 0)
+    fun `repeat step is clamped to the legal range on both sides`() = runTest {
+        val belowRange = newRepository()
+        val aboveRange = newRepository()
 
-        val clampedStep = newSettings.repeatStepPercent.coerceIn(1, 50)
+        belowRange.update { it.copy(repeatStepPercent = 0) }
+        aboveRange.update { it.copy(repeatStepPercent = 100) }
 
-        repository.update { it.copy(repeatStepPercent = clampedStep) }
-        val stored = repository.settings.first()
-
-        assertEquals(1, stored.repeatStepPercent)
+        assertEquals(1, belowRange.settings.first().repeatStepPercent)
+        assertEquals(50, aboveRange.settings.first().repeatStepPercent)
     }
 
-    /**
-     * Test: Repeat step clamping to maximum.
-     * When repeatStepPercent is above 50, it must be clamped to 50.
-     */
     @Test
-    fun `repeat step above 50 is clamped to 50 on write`() = runTest {
-        val repository = FakeSettingsRepository()
-        val newSettings = GlyphSettings.Default.copy(repeatStepPercent = 100)
-
-        val clampedStep = newSettings.repeatStepPercent.coerceIn(1, 50)
-
-        repository.update { it.copy(repeatStepPercent = clampedStep) }
-        val stored = repository.settings.first()
-
-        assertEquals(50, stored.repeatStepPercent)
-    }
-
-    /**
-     * Test: Round-trip write and read consistency.
-     * A non-default value must be readable exactly as it was written (after clamping).
-     */
-    @Test
-    fun `written value is read back without corruption`() = runTest {
-        val repository = FakeSettingsRepository()
-        val originalSettings = GlyphSettings(
+    fun `written values are read back without corruption`() = runTest {
+        val repository = newRepository()
+        val original = GlyphSettings(
             enabled = false,
             meterMode = MeterMode.ALWAYS_ON,
             brightness = 2500,
@@ -119,42 +93,30 @@ class DataStoreSettingsRepositoryTest {
             dimWhenFaceUp = true,
         )
 
-        repository.update { originalSettings }
-        val stored = repository.settings.first()
+        repository.update { original }
 
-        assertEquals(originalSettings, stored)
+        assertEquals(original, repository.settings.first())
     }
 
-    /**
-     * Test: Default values on empty storage.
-     * When no data has been written, reading must return the default settings,
-     * not null or an error.
-     */
     @Test
-    fun `absent keys read as defaults on first access`() = runTest {
-        val repository = FakeSettingsRepository()
-        val stored = repository.settings.first()
+    fun `an empty store reads back as the default settings`() = runTest {
+        val repository = newRepository()
 
-        assertEquals(GlyphSettings.Default, stored)
+        assertEquals(GlyphSettings.Default, repository.settings.first())
     }
 
-    /**
-     * Test: Invalid meter mode defaults gracefully.
-     * When an unknown or corrupted meter mode string is read from storage,
-     * it must be replaced with the default mode, not cause an exception.
-     * This is critical for forward-compatibility: if the enum is extended,
-     * existing users with old persisted mode names will still work.
-     */
     @Test
-    fun `corrupted or unknown meter mode reads as default`() = runTest {
-        val repository = FakeSettingsRepository()
+    fun `an unknown persisted meter mode name reads back as the default mode`() = runTest {
+        // Writing an invalid mode through update() is impossible by construction, since it only
+        // ever accepts a MeterMode enum value. A future rename of an enum entry would still
+        // leave this exact situation on an existing user's disk, so the corruption has to be
+        // injected below the repository's own API, directly into the store it reads from.
+        val dataStore = newDataStore()
+        val meterModeKey = stringPreferencesKey("meter_mode")
+        dataStore.edit { preferences -> preferences[meterModeKey] = "NO_SUCH_MODE" }
 
-        // Simulate reading an invalid mode by forcing the enum lookup to fail
-        val invalidModeName = "INVALID_MODE_XYZ"
-        val resolvedMode = MeterMode.entries.firstOrNull { it.name == invalidModeName }
-            ?: GlyphSettings.Default.meterMode
+        val repository = newRepository(dataStore)
 
-        // When resolved, it must be the default
-        assertEquals(GlyphSettings.Default.meterMode, resolvedMode)
+        assertEquals(GlyphSettings.Default.meterMode, repository.settings.first().meterMode)
     }
 }
