@@ -13,6 +13,13 @@ interface GlyphDisplay {
 
     val capability: StateFlow<RenderCapability>
 
+    /**
+     * Reason of the most recent failure, or null when the last connect succeeded. Unlike
+     * [capability] it survives [disconnect], so the user can still be told what went wrong
+     * after the service has given up and stopped.
+     */
+    val lastFailure: StateFlow<GlyphFailure?>
+
     /** Binds to the Glyph service and opens a session. Safe to call when already connected. */
     suspend fun connect(layout: DeviceLayout): Result<Unit>
 

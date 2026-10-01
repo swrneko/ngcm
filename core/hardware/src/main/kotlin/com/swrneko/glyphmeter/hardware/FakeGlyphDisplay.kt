@@ -16,6 +16,12 @@ class FakeGlyphDisplay : GlyphDisplay {
     private val _capability = MutableStateFlow(RenderCapability.UNKNOWN)
     override val capability: StateFlow<RenderCapability> = _capability.asStateFlow()
 
+    private val _lastFailure = MutableStateFlow<GlyphFailure?>(null)
+    override val lastFailure: StateFlow<GlyphFailure?> = _lastFailure.asStateFlow()
+
+    /** Reason a failing [connect] reports. */
+    var failureReason: GlyphFailure = GlyphFailure.REGISTRATION_REJECTED
+
     private val _rendered = mutableListOf<GlyphFrameData>()
     val rendered: List<GlyphFrameData> get() = _rendered.toList()
 
@@ -41,10 +47,12 @@ class FakeGlyphDisplay : GlyphDisplay {
         connectCount++
         if (connectResult.isFailure) {
             isConnected = false
+            _lastFailure.value = failureReason
             _capability.value = RenderCapability.UNAVAILABLE
             return connectResult
         }
         isConnected = true
+        _lastFailure.value = null
         _capability.value =
             if (failPerSegment) RenderCapability.STEPPED_ONLY else RenderCapability.PER_SEGMENT
         return connectResult
@@ -62,6 +70,7 @@ class FakeGlyphDisplay : GlyphDisplay {
     /** Simulates the Glyph service going away under an open session. */
     fun loseConnection() {
         isConnected = false
+        _lastFailure.value = GlyphFailure.SESSION_LOST
         _capability.value = RenderCapability.UNAVAILABLE
     }
 

@@ -39,6 +39,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swrneko.glyphmeter.R
 import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.hardware.GlyphFailure
 import com.swrneko.glyphmeter.hardware.RenderCapability
 import com.swrneko.glyphmeter.settings.MeterMode
 import kotlin.math.roundToInt
@@ -64,6 +65,7 @@ fun MainRoute(
         onPlayPreview = viewModel::onPlayPreview,
         onOpenSettings = onOpenSettings,
         onOpenOnboarding = onOpenOnboarding,
+        onRetryGlyph = viewModel::onRetryGlyph,
     )
 }
 
@@ -76,6 +78,7 @@ fun MainScreen(
     onPlayPreview: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenOnboarding: () -> Unit,
+    onRetryGlyph: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -96,6 +99,10 @@ fun MainScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // First, so a broken Glyph is the first thing the user sees (spec 7.4: no silent failure).
+            if (state.failure != null || state.capability == RenderCapability.UNAVAILABLE) {
+                GlyphFailureCard(state.failure, onRetryGlyph)
+            }
             EnabledCard(state.settings.enabled, onEnabledChange)
             PreviewCard(state, onPlayPreview)
             ModeCard(state.settings.meterMode, onModeChange)
@@ -254,6 +261,49 @@ private fun AccessCard(access: GlyphAccessState, onOpenOnboarding: () -> Unit) {
                 TextButton(onClick = onOpenOnboarding, modifier = Modifier.testTag("open_onboarding")) {
                     Text(stringResource(R.string.main_access_open_onboarding))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlyphFailureCard(failure: GlyphFailure?, onRetry: () -> Unit) {
+    val explanation = when (failure) {
+        GlyphFailure.REGISTRATION_REJECTED -> R.string.main_failure_rejected
+        GlyphFailure.SERVICE_UNREACHABLE -> R.string.main_failure_unreachable
+        GlyphFailure.SESSION_LOST -> R.string.main_failure_session_lost
+        GlyphFailure.RENDERING_FAILED -> R.string.main_failure_rendering
+        null -> R.string.main_failure_unknown
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("glyph_failure_card"),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Warning, contentDescription = null)
+                Text(
+                    text = stringResource(R.string.main_failure_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            Text(
+                text = stringResource(explanation),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            FilledTonalButton(onClick = onRetry, modifier = Modifier.testTag("glyph_failure_retry")) {
+                Text(stringResource(R.string.main_failure_retry))
             }
         }
     }

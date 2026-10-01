@@ -162,4 +162,49 @@ class NothingGlyphDisplayTest {
         assertTrue(boundConnections.isEmpty())
         assertEquals(RenderCapability.UNKNOWN, display.capability.value)
     }
+
+    @Test
+    fun `a rejected registration is remembered as the reason`() = runTest {
+        service.acceptRegistration = false
+        val display = NothingGlyphDisplay(app)
+
+        connect(display)
+
+        assertEquals(GlyphFailure.REGISTRATION_REJECTED, display.lastFailure.value)
+    }
+
+    @Test
+    fun `the reason survives the disconnect that follows a failure`() = runTest {
+        service.acceptRegistration = false
+        val display = NothingGlyphDisplay(app)
+        connect(display)
+
+        display.disconnect()
+
+        assertEquals(RenderCapability.UNKNOWN, display.capability.value)
+        assertEquals(GlyphFailure.REGISTRATION_REJECTED, display.lastFailure.value)
+    }
+
+    @Test
+    fun `a lost session is remembered as the reason`() = runTest {
+        val display = NothingGlyphDisplay(app)
+        connect(display)
+
+        boundConnections.single().onServiceDisconnected(glyphService)
+        display.disconnect()
+
+        assertEquals(GlyphFailure.SESSION_LOST, display.lastFailure.value)
+    }
+
+    @Test
+    fun `a successful connect clears the remembered reason`() = runTest {
+        service.acceptRegistration = false
+        val display = NothingGlyphDisplay(app)
+        connect(display)
+
+        service.acceptRegistration = true
+        connect(display)
+
+        assertEquals(null, display.lastFailure.value)
+    }
 }

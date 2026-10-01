@@ -38,6 +38,13 @@
     <string name="main_access_unsupported">This phone is not supported</string>
     <string name="main_access_open_onboarding">Details</string>
     <string name="main_reduced_smoothness">Smoothness is reduced. Nothing removed per-segment brightness on this phone, so the meter moves in whole-segment steps.</string>
+    <string name="main_failure_title">The Glyph stopped responding</string>
+    <string name="main_failure_rejected">The Glyph service refused this app. On Nothing OS 3.x this usually means Glyph debug mode has expired and the app has no permission to turn it back on. Open Details above for the one-time setup, then check again.</string>
+    <string name="main_failure_unreachable">The Glyph service could not be reached or would not open a session. Check again in a moment; restarting the phone usually helps.</string>
+    <string name="main_failure_session_lost">The system closed the connection to the Glyph and reconnecting did not work. Check again to retry.</string>
+    <string name="main_failure_rendering">The Glyph accepted the connection but could not draw the meter. Check again to retry.</string>
+    <string name="main_failure_unknown">The Glyph service is not available right now. Check again to retry.</string>
+    <string name="main_failure_retry">Check again</string>
     <string name="preview_state">%1$d of %2$d segments lit</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>

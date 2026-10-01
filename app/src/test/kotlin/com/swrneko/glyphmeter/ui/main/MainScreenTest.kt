@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.hardware.GlyphFailure
 import com.swrneko.glyphmeter.hardware.RenderCapability
 import com.swrneko.glyphmeter.layout.DeviceLayouts
 import com.swrneko.glyphmeter.layout.MeterRenderer
@@ -33,10 +34,12 @@ class MainScreenTest {
         settings: GlyphSettings = GlyphSettings.Default,
         capability: RenderCapability = RenderCapability.PER_SEGMENT,
         access: GlyphAccessState = GlyphAccessState.WORKING,
+        failure: GlyphFailure? = null,
     ) = MainUiState(
         settings = settings,
         level = 0.5f,
         capability = capability,
+        failure = failure,
         access = access,
         layout = layout,
         previewFrame = MeterRenderer.smooth(0.5f, layout, Light.MAX),
@@ -49,9 +52,10 @@ class MainScreenTest {
         onPlayPreview: () -> Unit = {},
         onOpenSettings: () -> Unit = {},
         onOpenOnboarding: () -> Unit = {},
+        onRetryGlyph: () -> Unit = {},
     ) {
         compose.setContent {
-            MainScreen(state, onEnabledChange, onModeChange, onPlayPreview, onOpenSettings, onOpenOnboarding)
+            MainScreen(state, onEnabledChange, onModeChange, onPlayPreview, onOpenSettings, onOpenOnboarding, onRetryGlyph)
         }
     }
 
@@ -76,11 +80,37 @@ class MainScreenTest {
         compose.onNodeWithTag("reduced_smoothness_warning").assertDoesNotExist()
     }
 
+    // Inverted from the_warning_is_hidden_when_the_glyph_service_is_unavailable, which pinned the
+    // silent failure the spec (7.4) forbids: an unavailable Glyph must be explained, not hidden.
     @Test
-    fun the_warning_is_hidden_when_the_glyph_service_is_unavailable() {
+    fun a_warning_is_shown_when_the_glyph_service_is_unavailable() {
         show(state(capability = RenderCapability.UNAVAILABLE))
 
-        compose.onNodeWithTag("reduced_smoothness_warning").assertDoesNotExist()
+        compose.onNodeWithTag("glyph_failure_card").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun a_remembered_failure_is_shown_even_after_the_service_has_disconnected() {
+        show(state(capability = RenderCapability.UNKNOWN, failure = GlyphFailure.REGISTRATION_REJECTED))
+
+        compose.onNodeWithTag("glyph_failure_card").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun no_failure_card_while_the_glyph_works() {
+        show(state(capability = RenderCapability.PER_SEGMENT, failure = null))
+
+        compose.onNodeWithTag("glyph_failure_card").assertDoesNotExist()
+    }
+
+    @Test
+    fun the_failure_card_offers_a_new_check() {
+        var retried = false
+        show(state(failure = GlyphFailure.SESSION_LOST), onRetryGlyph = { retried = true })
+
+        compose.onNodeWithTag("glyph_failure_retry").performScrollTo().performClick()
+
+        assertTrue(retried)
     }
 
     @Test

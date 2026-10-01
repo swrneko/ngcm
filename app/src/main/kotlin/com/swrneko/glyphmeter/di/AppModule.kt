@@ -51,6 +51,10 @@ object AppModule {
         )
     }
 
+    @Provides
+    @IoDispatcher
+    fun provideIoDispatcher(): CoroutineDispatcher = Dispatchers.IO
+
     // SINGLE-THREAD REQUIREMENT, DO NOT "OPTIMISE" AWAY, AND DO NOT CREATE ANOTHER ONE:
     // every limitedParallelism(1) call makes an INDEPENDENT one-thread context, so this must
     // stay a single application-wide singleton shared by all service instances. Otherwise a

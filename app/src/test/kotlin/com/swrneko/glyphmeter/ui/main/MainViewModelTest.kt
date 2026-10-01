@@ -3,6 +3,7 @@ package com.swrneko.glyphmeter.ui.main
 import com.swrneko.glyphmeter.access.GlyphAccessManager
 import com.swrneko.glyphmeter.charging.FakeChargingStateSource
 import com.swrneko.glyphmeter.hardware.FakeGlyphDisplay
+import com.swrneko.glyphmeter.hardware.GlyphFailure
 import com.swrneko.glyphmeter.layout.DeviceLayouts
 import com.swrneko.glyphmeter.layout.MeterRenderer
 import com.swrneko.glyphmeter.model.Light
@@ -58,6 +59,7 @@ class MainViewModelTest {
         accessManager = GlyphAccessManager(emptyList(), { supported }, { requiresDebugMode }),
         layout = layout,
         serviceController = controller,
+        ioDispatcher = UnconfinedTestDispatcher(),
     )
 
     @Test
@@ -177,5 +179,43 @@ class MainViewModelTest {
 
         assertEquals(null, vm.state.value?.previewFrame)
         assertEquals(Light.MAX, vm.state.value?.settings?.brightness)
+    }
+
+    @Test
+    fun a_failed_connection_stays_visible_after_the_display_is_disconnected() = runTest(UnconfinedTestDispatcher()) {
+        charging.emit(isCharging = true, level = 0.5f)
+        val vm = viewModel()
+        backgroundScope.launch { vm.state.collect {} }
+
+        display.connectResult = Result.failure(IllegalStateException("register rejected"))
+        display.connect(layout)
+        display.disconnect()
+
+        assertEquals(GlyphFailure.REGISTRATION_REJECTED, vm.state.value?.failure)
+    }
+
+    @Test
+    fun checking_again_restarts_the_service_when_access_allows_it() = runTest(UnconfinedTestDispatcher()) {
+        val vm = viewModel()
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+        val before = controller.starts
+
+        vm.onRetryGlyph()
+        advanceUntilIdle()
+
+        assertEquals(before + 1, controller.starts)
+    }
+
+    @Test
+    fun checking_again_does_not_start_the_service_when_setup_is_still_needed() = runTest(UnconfinedTestDispatcher()) {
+        val vm = viewModel(requiresDebugMode = true)
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        vm.onRetryGlyph()
+        advanceUntilIdle()
+
+        assertEquals(0, controller.starts)
     }
 }

@@ -31,6 +31,9 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
     private val _capability = MutableStateFlow(RenderCapability.UNKNOWN)
     override val capability: StateFlow<RenderCapability> = _capability.asStateFlow()
 
+    private val _lastFailure = MutableStateFlow<GlyphFailure?>(null)
+    override val lastFailure: StateFlow<GlyphFailure?> = _lastFailure.asStateFlow()
+
     // Volatile: the SDK reports a lost service on the main thread, everything else runs on the
     // glyph dispatcher.
     @Volatile private var manager: GlyphManager? = null
@@ -47,10 +50,10 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
 
         this.layout = layout
         val deviceId = resolveDeviceId(layout)
-            ?: return fail("unsupported device id ${layout.deviceId}")
+            ?: return fail(GlyphFailure.SERVICE_UNREACHABLE, "unsupported device id ${layout.deviceId}")
 
         val instance = GlyphManager.getInstance(context.applicationContext)
-            ?: return fail("GlyphManager.getInstance returned null")
+            ?: return fail(GlyphFailure.SERVICE_UNREACHABLE, "GlyphManager.getInstance returned null")
 
         val bound = withTimeoutOrNull(SERVICE_CONNECT_TIMEOUT_MS) {
             suspendCancellableCoroutine<Boolean> { continuation ->
@@ -71,24 +74,25 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
                         .onFailure { Log.w(TAG, "unInit after cancelled connect failed", it) }
                 }
             }
-        } ?: return fail("timed out waiting for the Glyph service")
+        } ?: return fail(GlyphFailure.SERVICE_UNREACHABLE, "timed out waiting for the Glyph service")
 
-        if (!bound) return failAndRelease(instance, "Glyph service refused the connection")
+        if (!bound) return failAndRelease(instance, GlyphFailure.SERVICE_UNREACHABLE, "Glyph service refused the connection")
 
         // From here on the service is bound: every failure must unbind it again, or each failed
         // attempt would leave one more ServiceConnection registered in the GlyphManager singleton.
         if (!instance.register(deviceId)) {
-            return failAndRelease(instance, "register($deviceId) was rejected; check the Glyph permission and debug mode")
+            return failAndRelease(instance, GlyphFailure.REGISTRATION_REJECTED, "register($deviceId) was rejected; check the Glyph permission and debug mode")
         }
 
         return try {
             instance.openSession()
             manager = instance
             sessionOpen = true
+            _lastFailure.value = null
             _capability.value = RenderCapability.PER_SEGMENT
             Result.success(Unit)
         } catch (e: Throwable) {
-            failAndRelease(instance, "openSession failed: ${e.message}")
+            failAndRelease(instance, GlyphFailure.SERVICE_UNREACHABLE, "openSession failed: ${e.message}")
         }
     }
 
@@ -107,13 +111,14 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
         manager = null
         runCatching { instance.unInit() }
             .onFailure { Log.w(TAG, "unInit after a lost session failed", it) }
+        _lastFailure.value = GlyphFailure.SESSION_LOST
         _capability.value = RenderCapability.UNAVAILABLE
     }
 
-    private fun failAndRelease(instance: GlyphManager, reason: String): Result<Unit> {
+    private fun failAndRelease(instance: GlyphManager, failure: GlyphFailure, reason: String): Result<Unit> {
         runCatching { instance.unInit() }
             .onFailure { Log.w(TAG, "unInit after a failed connect failed", it) }
-        return fail(reason)
+        return fail(failure, reason)
     }
 
     override fun render(frame: GlyphFrameData) {
@@ -157,6 +162,7 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
             manager.displayProgress(builder.build(), percent)
         } catch (e: Throwable) {
             Log.e(TAG, "stepped rendering failed too", e)
+            _lastFailure.value = GlyphFailure.RENDERING_FAILED
             _capability.value = RenderCapability.UNAVAILABLE
         }
     }
@@ -179,12 +185,15 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
 
         sessionOpen = false
         manager = null
+        // lastFailure is deliberately left alone: the service disconnects on its way out after a
+        // failure, and that must not wipe the explanation the main screen shows.
         _capability.value = RenderCapability.UNKNOWN
     }
 
-    private fun fail(reason: String): Result<Unit> {
+    private fun fail(failure: GlyphFailure, reason: String): Result<Unit> {
         Log.w(TAG, reason)
         sessionOpen = false
+        _lastFailure.value = failure
         _capability.value = RenderCapability.UNAVAILABLE
         return Result.failure(IllegalStateException(reason))
     }
