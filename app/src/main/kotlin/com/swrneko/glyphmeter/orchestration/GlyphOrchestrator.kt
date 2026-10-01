@@ -70,6 +70,9 @@ class GlyphOrchestrator(
     private var shownLevel: Float = 0f
     private var lastTriggerLevel: Float? = null
     private var wasCharging = false
+
+    /** The full-charge preset has played in this charging session; reset on unplug. */
+    private var fullPlayed = false
     private var showJob: Job? = null
 
     /** Frame the always-on refresher re-sends; null whenever something else owns the display. */
@@ -147,6 +150,7 @@ class GlyphOrchestrator(
         if (!settings.enabled || !charging.isCharging) {
             val wasOn = wasCharging
             wasCharging = false
+            fullPlayed = false
             lastTriggerLevel = null
             shownLevel = 0f
             cancelShow()
@@ -173,9 +177,24 @@ class GlyphOrchestrator(
             cancelShow()
             shownLevel = 0f
             lastTriggerLevel = charging.level
+            // Plugging in at 100% already plays the full-charge preset (see presetFor).
+            fullPlayed = charging.level >= 1f
             startShow(scope) {
                 rearm()
                 play(PresetFrameSource(presetFor(charging, settings), layout, settings.brightness))
+                showMeter(charging, settings)
+            }
+            return
+        }
+
+        if (charging.level >= 1f && !fullPlayed) {
+            // Reaching 100% while plugged in is an event of its own, in either mode.
+            fullPlayed = true
+            lastTriggerLevel = charging.level
+            cancelShow()
+            startShow(scope) {
+                play(PresetFrameSource(fullPreset(settings), layout, settings.brightness))
+                shownLevel = 0f
                 showMeter(charging, settings)
             }
             return
@@ -268,10 +287,13 @@ class GlyphOrchestrator(
 
     private fun presetFor(charging: ChargingState, settings: GlyphSettings): AnimationPreset {
         val id = when {
-            charging.level >= 1f -> settings.fullPresetId
+            charging.level >= 1f -> return fullPreset(settings)
             charging.source == PowerSource.WIRELESS -> settings.wirelessPresetId
             else -> settings.wiredPresetId
         }
         return AnimationPresets.byId(id) ?: AnimationPresets.FILL_UP
     }
+
+    private fun fullPreset(settings: GlyphSettings): AnimationPreset =
+        AnimationPresets.byId(settings.fullPresetId) ?: AnimationPresets.FLASH
 }

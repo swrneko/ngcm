@@ -1,6 +1,8 @@
 package com.swrneko.glyphmeter.orchestration
 
 import app.cash.turbine.test
+import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.animation.PresetFrameSource
 import com.swrneko.glyphmeter.charging.FakeChargingStateSource
 import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.FakeGlyphDisplay
@@ -583,5 +585,85 @@ class GlyphOrchestratorTest {
         }
 
         assertTrue("a flapping service must not keep the orchestrator alive forever", job.isCompleted)
+    }
+
+    /** The frames the full-charge preset draws, sampled the way the orchestrator plays them. */
+    private fun fullPresetFrames(settings: GlyphSettings, count: Int) =
+        PresetFrameSource(AnimationPresets.byId(settings.fullPresetId)!!, layout, settings.brightness)
+            .let { source -> (0 until count).map { source.frameAt(it * 16L) } }
+
+    @Test
+    fun `reaching full charge while plugged in plays the full charge preset`() = runTest {
+        for (mode in MeterMode.entries) {
+            val display = FakeGlyphDisplay()
+            val charging = FakeChargingStateSource()
+            val initial = GlyphSettings.Default.copy(meterMode = mode, fullPresetId = AnimationPresets.CHASE.id)
+            val job = launch { orchestrator(display, charging, FakeSettingsRepository(initial)).run() }
+            runCurrent()
+            charging.emit(isCharging = true, level = 0.99f)
+            advanceTimeBy(20_000)
+            runCurrent()
+            display.clearRendered()
+
+            charging.emit(isCharging = true, level = 1f)
+            advanceTimeBy(200)
+            runCurrent()
+
+            assertEquals("$mode: the full-charge preset must play", fullPresetFrames(initial, 10), display.rendered.take(10))
+
+            job.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `the full charge preset plays only once per charging session`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val initial = GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON, fullPresetId = AnimationPresets.CHASE.id)
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(initial)).run() }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.99f)
+        advanceTimeBy(20_000)
+        charging.emit(isCharging = true, level = 1f)
+        advanceTimeBy(20_000)
+        charging.emit(isCharging = true, level = 0.99f)
+        advanceTimeBy(20_000)
+        runCurrent()
+        display.clearRendered()
+
+        charging.emit(isCharging = true, level = 1f)
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertNotEquals(fullPresetFrames(initial, 10), display.rendered.take(10))
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a new charging session can play the full charge preset again`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val initial = GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON, fullPresetId = AnimationPresets.CHASE.id)
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(initial)).run() }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.99f)
+        advanceTimeBy(20_000)
+        charging.emit(isCharging = true, level = 1f)
+        advanceTimeBy(20_000)
+        charging.emit(isCharging = false, level = 1f, source = PowerSource.NONE)
+        advanceTimeBy(5_000)
+        charging.emit(isCharging = true, level = 0.99f)
+        advanceTimeBy(20_000)
+        runCurrent()
+        display.clearRendered()
+
+        charging.emit(isCharging = true, level = 1f)
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertEquals(fullPresetFrames(initial, 10), display.rendered.take(10))
+
+        job.cancelAndJoin()
     }
 }
