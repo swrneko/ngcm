@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Glyph Meter</string>
+    <string name="service_notification_title">Glyph Meter</string>
+    <string name="service_notification_text">Showing charge level on the Glyph interface</string>
+    <string name="service_channel_name">Glyph service</string>
 </resources>

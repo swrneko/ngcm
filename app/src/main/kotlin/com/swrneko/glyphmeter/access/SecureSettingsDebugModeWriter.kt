@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.Settings
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 internal const val GLYPH_DEBUG_SETTING = "nt_glyph_interface_debug_enable"
@@ -16,7 +17,7 @@ internal const val GLYPH_DEBUG_SETTING = "nt_glyph_interface_debug_enable"
  * mattering because the app simply turns it back on.
  */
 class SecureSettingsDebugModeWriter @Inject constructor(
-    private val context: Context,
+    @ApplicationContext private val context: Context,
 ) : DebugModeWriter {
 
     override val isAvailable: Boolean
