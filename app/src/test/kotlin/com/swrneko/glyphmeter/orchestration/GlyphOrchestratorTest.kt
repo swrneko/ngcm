@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -244,5 +245,126 @@ class GlyphOrchestratorTest {
         }
 
         job.cancelAndJoin()
+    }
+
+    @Test
+    fun `unplugging during a long hold darkens the glyph at once`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(
+            GlyphSettings.Default.copy(meterMode = MeterMode.ON_EVENT, showDurationMillis = 30_000),
+        )
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(5_000)
+        runCurrent()
+        val before = display.turnOffCount
+
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        assertTrue("glyph must go dark long before the 30 s hold ends", display.turnOffCount > before)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `disabling the app during a long hold darkens the glyph at once`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(
+            GlyphSettings.Default.copy(meterMode = MeterMode.ON_EVENT, showDurationMillis = 30_000),
+        )
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(5_000)
+        runCurrent()
+        val before = display.turnOffCount
+
+        settings.update { it.copy(enabled = false) }
+        advanceTimeBy(100)
+        runCurrent()
+
+        assertTrue("disabling must darken immediately", display.turnOffCount > before)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a small gain during a hold does not cut the show short`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(
+            GlyphSettings.Default.copy(
+                meterMode = MeterMode.ON_EVENT,
+                showDurationMillis = 2_000,
+                repeatStepPercent = 5,
+            ),
+        )
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.50f, source = PowerSource.WIRED)
+        advanceTimeBy(3_000)
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.52f, source = PowerSource.WIRED)
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        assertTrue("the meter must still go dark afterwards", display.turnOffCount >= 1)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `replugging in the middle of the fade out still darkens the glyph`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON))
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(3_000)
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(50)
+        runCurrent()
+        val before = display.turnOffCount
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        runCurrent()
+
+        assertTrue("an interrupted fade must still end in darkness", display.turnOffCount > before)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `wired and wireless power play different animations`() = runTest {
+        suspend fun firstFrames(source: PowerSource): List<List<Int>> {
+            val display = FakeGlyphDisplay()
+            val charging = FakeChargingStateSource()
+            val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ON_EVENT))
+            val job = launch { orchestrator(display, charging, settings).run() }
+            runCurrent()
+            charging.emit(isCharging = true, level = 0.5f, source = source)
+            advanceTimeBy(400)
+            runCurrent()
+            val frames = display.rendered.map { frame -> meter.map { frame[it] } }
+            job.cancelAndJoin()
+            return frames
+        }
+
+        val wired = firstFrames(PowerSource.WIRED)
+        val wireless = firstFrames(PowerSource.WIRELESS)
+
+        assertTrue(wired.isNotEmpty() && wireless.isNotEmpty())
+        assertNotEquals(wired, wireless)
     }
 }

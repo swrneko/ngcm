@@ -17,6 +17,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import com.swrneko.glyphmeter.model.GlyphFrameData
@@ -43,6 +46,7 @@ class GlyphOrchestrator(
     private var shownLevel: Float = 0f
     private var lastTriggerLevel: Float? = null
     private var wasCharging = false
+    private var showJob: Job? = null
 
     /** Frame the always-on refresher re-sends; null whenever something else owns the display. */
     private var heldFrame: GlyphFrameData? = null
@@ -52,15 +56,20 @@ class GlyphOrchestrator(
 
         coroutineScope {
             launch { refreshHeldFrame() }
-            observe()
+            try {
+                observe(this)
+            } finally {
+                heldFrame = null
+                stop()
+            }
         }
     }
 
-    private suspend fun observe() {
+    private suspend fun observe(scope: CoroutineScope) {
         combine(chargingSource.state, settingsRepository.settings) { charging, settings ->
             charging to settings
         }.collect { (charging, settings) ->
-            handle(charging, settings)
+            handle(scope, charging, settings)
         }
     }
 
@@ -72,25 +81,31 @@ class GlyphOrchestrator(
         }
     }
 
-    private suspend fun handle(charging: ChargingState, settings: GlyphSettings) {
+    private suspend fun handle(
+        scope: CoroutineScope,
+        charging: ChargingState,
+        settings: GlyphSettings,
+    ) {
         heldFrame = null
-        if (!settings.enabled) {
+
+        if (!settings.enabled || !charging.isCharging) {
             val wasOn = wasCharging
             wasCharging = false
             lastTriggerLevel = null
             shownLevel = 0f
-            if (wasOn) stop()
-            return
-        }
-
-        if (!charging.isCharging) {
-            val fade = wasCharging
-            wasCharging = false
-            lastTriggerLevel = null
-            shownLevel = 0f
-            if (fade) {
-                play(PresetFrameSource(AnimationPresets.FADE_OUT, layout, settings.brightness))
+            cancelShow()
+            if (!wasOn) return
+            if (!settings.enabled) {
                 stop()
+            } else {
+                startShow(scope) {
+                    // Darkness is guaranteed even if a newer event cancels the fade.
+                    try {
+                        play(PresetFrameSource(AnimationPresets.FADE_OUT, layout, settings.brightness))
+                    } finally {
+                        stop()
+                    }
+                }
             }
             return
         }
@@ -99,26 +114,44 @@ class GlyphOrchestrator(
         wasCharging = true
 
         if (justPlugged) {
+            cancelShow()
             shownLevel = 0f
             lastTriggerLevel = charging.level
-            play(PresetFrameSource(presetFor(charging, settings), layout, settings.brightness))
-            showMeter(charging, settings)
+            startShow(scope) {
+                play(PresetFrameSource(presetFor(charging, settings), layout, settings.brightness))
+                showMeter(charging, settings)
+            }
             return
         }
 
         when (settings.meterMode) {
-            MeterMode.ALWAYS_ON -> showMeter(charging, settings)
+            MeterMode.ALWAYS_ON -> {
+                cancelShow()
+                startShow(scope) { showMeter(charging, settings) }
+            }
 
             MeterMode.ON_EVENT -> {
                 val since = lastTriggerLevel ?: charging.level
                 val gainedPercent = ((charging.level - since) * 100).roundToInt()
 
+                // A small gain must leave a running show alone, otherwise its fade would never happen.
                 if (abs(gainedPercent) >= settings.repeatStepPercent) {
                     lastTriggerLevel = charging.level
-                    showMeter(charging, settings)
+                    cancelShow()
+                    startShow(scope) { showMeter(charging, settings) }
                 }
             }
         }
+    }
+
+    /** Cancels the running show and waits until it has fully unwound, so it cannot touch the display later. */
+    private suspend fun cancelShow() {
+        showJob?.cancelAndJoin()
+        showJob = null
+    }
+
+    private fun startShow(scope: CoroutineScope, block: suspend () -> Unit) {
+        showJob = scope.launch { block() }
     }
 
     /** Animates the meter to [charging]'s level, then holds or fades depending on the mode. */
@@ -138,9 +171,12 @@ class GlyphOrchestrator(
             heldFrame = transition.frameAt(transition.durationMillis)
         } else {
             hold(settings.showDurationMillis, transition)
-            play(PresetFrameSource(AnimationPresets.FADE_OUT, layout, settings.brightness))
-            stop()
-            shownLevel = 0f
+            try {
+                play(PresetFrameSource(AnimationPresets.FADE_OUT, layout, settings.brightness))
+            } finally {
+                stop()
+                shownLevel = 0f
+            }
         }
     }
 
