@@ -48,7 +48,7 @@ Android-приложение: показ уровня заряда на Glyph-и
   - `access` — состояния доступа к Glyph, debug-режим, политики запуска, writer'ы (secure settings, Shizuku);
   - `charging` — источник состояния зарядки (система и фейк);
   - `orientation` — источник «телефон лежит экраном вверх» (датчик и фейк), активен только во время зарядки;
-  - `orchestration` — `GlyphOrchestrator`, сценарии показа;
+  - `orchestration` — `GlyphOrchestrator`, сценарии показа, `PreviewRequestBus` (запросы превью пресета от интерфейса; единственный потребитель — оркестратор);
   - `service` — foreground-сервис (`specialUse`), `BootReceiver`, контроллер сервиса;
   - `settings` — `GlyphSettings` и репозиторий на DataStore;
   - `di` — Hilt-модули, `@GlyphDispatcher`;
