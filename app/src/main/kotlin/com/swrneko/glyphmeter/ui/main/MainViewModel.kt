@@ -1,0 +1,99 @@
+package com.swrneko.glyphmeter.ui.main
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.swrneko.glyphmeter.access.GlyphAccessManager
+import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.charging.ChargingStateSource
+import com.swrneko.glyphmeter.hardware.GlyphDisplay
+import com.swrneko.glyphmeter.hardware.RenderCapability
+import com.swrneko.glyphmeter.layout.MeterRenderer
+import com.swrneko.glyphmeter.model.DeviceLayout
+import com.swrneko.glyphmeter.model.GlyphFrameData
+import com.swrneko.glyphmeter.service.MeterServiceController
+import com.swrneko.glyphmeter.settings.GlyphSettings
+import com.swrneko.glyphmeter.settings.MeterMode
+import com.swrneko.glyphmeter.settings.SettingsRepository
+import com.swrneko.glyphmeter.ui.preview.PresetPreviewPlayer
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+data class MainUiState(
+    val settings: GlyphSettings,
+    /** Battery level, 0..1. */
+    val level: Float,
+    val capability: RenderCapability,
+    val access: GlyphAccessState,
+    /** Null on a phone with no known Glyph layout; the preview is then hidden. */
+    val layout: DeviceLayout?,
+    /** What the preview shows: a playing animation, or else the current battery level. */
+    val previewFrame: GlyphFrameData?,
+)
+
+@HiltViewModel
+class MainViewModel @Inject constructor(
+    private val settingsRepository: SettingsRepository,
+    chargingSource: ChargingStateSource,
+    display: GlyphDisplay,
+    private val accessManager: GlyphAccessManager,
+    private val layout: DeviceLayout?,
+    private val serviceController: MeterServiceController,
+) : ViewModel() {
+
+    private val access = MutableStateFlow(GlyphAccessState.CHECKING)
+
+    private val player = PresetPreviewPlayer(viewModelScope, nowMillis = { System.nanoTime() / 1_000_000 })
+
+    /** Null until the first settings and battery reading have arrived. */
+    val state: StateFlow<MainUiState?> = combine(
+        settingsRepository.settings,
+        chargingSource.state,
+        display.capability,
+        access,
+        player.frame,
+    ) { settings, charging, capability, accessState, playing ->
+        val idleFrame = layout?.let { MeterRenderer.smooth(charging.level, it, settings.brightness) }
+        MainUiState(
+            settings = settings,
+            level = charging.level,
+            capability = capability,
+            access = accessState,
+            layout = layout,
+            previewFrame = playing ?: idleFrame,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    init {
+        viewModelScope.launch {
+            // Evaluation may talk to Shizuku or secure settings, keep it off the main thread.
+            access.value = withContext(Dispatchers.IO) { accessManager.evaluate() }
+        }
+    }
+
+    /** Turns the whole app on or off. The service follows this switch, and only this switch. */
+    fun onEnabledChange(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.update { it.copy(enabled = enabled) } }
+        if (enabled) serviceController.start() else serviceController.stop()
+    }
+
+    fun onModeChange(mode: MeterMode) {
+        viewModelScope.launch { settingsRepository.update { it.copy(meterMode = mode) } }
+    }
+
+    /** Plays the wired-charging animation on the preview. */
+    fun onPlayPreview() {
+        val current = state.value ?: return
+        val layout = current.layout ?: return
+        val preset = AnimationPresets.byId(current.settings.wiredPresetId) ?: AnimationPresets.FILL_UP
+        player.play(preset, layout, current.settings.brightness)
+    }
+}
