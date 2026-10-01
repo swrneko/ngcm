@@ -23,7 +23,13 @@
 
 ## Установка
 
-Готовых релизов пока нет: соберите APK из исходников (раздел «Сборка из исходников») и установите его на телефон, например через `adb install app/build/outputs/apk/debug/app-debug.apk`.
+Скачайте `glyph-meter-<версия>.apk` со страницы [Releases](https://github.com/swrneko/ngcm/releases) и установите его на телефон. Можно открыть файл прямо на телефоне, разрешив установку из этого источника, или поставить с компьютера:
+
+```bash
+adb install glyph-meter-0.1.0.apk
+```
+
+Релизы помечены как предварительные, пока приложение не проверено на живом телефоне. Обновления подписываются одним ключом, поэтому новая версия ставится поверх старой без удаления.
 
 **Nothing OS 4.0 и новее (Android 16).** Ничего настраивать не нужно: ограничение на доступ к Glyph снято.
 
@@ -39,12 +45,16 @@ adb shell pm grant com.swrneko.glyphmeter android.permission.WRITE_SECURE_SETTIN
 
 ## Сборка из исходников
 
-Нужны JDK 17 и Android SDK (путь к нему в `local.properties`).
+Нужны JDK 17 и Android SDK с платформой `android-37` (путь к SDK в `local.properties`, строка `sdk.dir=...`).
 
 ```bash
-./gradlew assembleDebug    # APK: app/build/outputs/apk/debug
+git clone https://github.com/swrneko/ngcm.git
+cd ngcm
+./gradlew assembleDebug    # APK: app/build/outputs/apk/debug/app-debug.apk
 ./gradlew test             # юнит-тесты
 ```
+
+Релизная сборка `./gradlew assembleRelease` подписывается, только если в корне лежит `keystore.properties` с ключом. Без него получится неподписанный APK. Ключ есть только у автора, поэтому собранный самостоятельно APK не встанет поверх версии из Releases: сначала удалите её.
 
 Glyph SDK лежит в репозитории как локальный `.aar` в `core/hardware/libs/`.
 
