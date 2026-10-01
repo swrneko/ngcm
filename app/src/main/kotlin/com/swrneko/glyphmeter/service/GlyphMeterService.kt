@@ -17,6 +17,7 @@ import com.swrneko.glyphmeter.di.GlyphDispatcher
 import com.swrneko.glyphmeter.hardware.GlyphDisplay
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.orchestration.GlyphOrchestrator
+import com.swrneko.glyphmeter.orientation.OrientationSource
 import com.swrneko.glyphmeter.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineDispatcher
@@ -43,6 +44,7 @@ class GlyphMeterService : Service() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var layoutProvider: Provider<DeviceLayout?>
     @Inject lateinit var accessManager: GlyphAccessManager
+    @Inject lateinit var orientationSource: OrientationSource
 
     /** Application-wide single thread, see AppModule.provideGlyphDispatcher. Never create one here. */
     @Inject @GlyphDispatcher lateinit var glyphDispatcher: CoroutineDispatcher
@@ -83,6 +85,7 @@ class GlyphMeterService : Service() {
             chargingSource = chargingSource,
             settingsRepository = settingsRepository,
             layout = layout,
+            orientationSource = orientationSource,
             // Debug mode expires after 48 hours; re-arm it before every connect and on every
             // plug-in. evaluate() may reach Shizuku over IPC, so it never runs on the glyph thread.
             rearmAccess = { withContext(Dispatchers.IO) { accessManager.evaluate() } },

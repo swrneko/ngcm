@@ -11,13 +11,19 @@ import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.GlyphDisplay
 import com.swrneko.glyphmeter.hardware.RenderCapability
 import com.swrneko.glyphmeter.model.DeviceLayout
+import com.swrneko.glyphmeter.orientation.OrientationSource
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
 import com.swrneko.glyphmeter.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
@@ -55,12 +61,17 @@ private const val STABLE_SESSION_MILLIS = 60_000L
  * returns, so the caller can stop instead of idling as a zombie. A session that drops again
  * within [stableSessionMillis] keeps spending the same budget, so a flapping service cannot
  * make the attempts endless.
+ *
+ * With [GlyphSettings.dimWhenFaceUp] on, the Glyph stays dark while [orientationSource] says the
+ * phone lies screen up. Orientation is collected only while charging with that setting on, so
+ * the sensor behind it never runs otherwise.
  */
 class GlyphOrchestrator(
     private val display: GlyphDisplay,
     private val chargingSource: ChargingStateSource,
     private val settingsRepository: SettingsRepository,
     private val layout: DeviceLayout,
+    private val orientationSource: OrientationSource = OrientationSource.NeverFaceUp,
     private val rearmAccess: suspend () -> Unit = {},
     private val reconnectDelaysMillis: List<Long> = DEFAULT_RECONNECT_DELAYS_MILLIS,
     private val stableSessionMillis: Long = STABLE_SESSION_MILLIS,
@@ -70,6 +81,9 @@ class GlyphOrchestrator(
     private var shownLevel: Float = 0f
     private var lastTriggerLevel: Float? = null
     private var wasCharging = false
+
+    /** The glyph is held dark because the phone lies face up. */
+    private var dimmed = false
 
     /** The full-charge preset has played in this charging session; reset on unplug. */
     private var fullPlayed = false
@@ -124,11 +138,20 @@ class GlyphOrchestrator(
         return false
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun observe(scope: CoroutineScope) {
         combine(chargingSource.state, settingsRepository.settings) { charging, settings ->
             charging to settings
-        }.collect { (charging, settings) ->
-            handle(scope, charging, settings)
+        }.flatMapLatest { (charging, settings) ->
+            if (charging.isCharging && settings.enabled && settings.dimWhenFaceUp) {
+                // Nothing is decided until the sensor has spoken, so a phone plugged in face up
+                // never flashes the plug-in animation first.
+                orientationSource.isFaceUp.distinctUntilChanged().map { Triple(charging, settings, it) }
+            } else {
+                flowOf(Triple(charging, settings, false))
+            }
+        }.collect { (charging, settings, faceUp) ->
+            handle(scope, charging, settings, faceUp)
         }
     }
 
@@ -144,18 +167,22 @@ class GlyphOrchestrator(
         scope: CoroutineScope,
         charging: ChargingState,
         settings: GlyphSettings,
+        faceUp: Boolean,
     ) {
         heldFrame = null
 
         if (!settings.enabled || !charging.isCharging) {
             val wasOn = wasCharging
+            val wasDimmed = dimmed
             wasCharging = false
+            dimmed = false
             fullPlayed = false
             lastTriggerLevel = null
             shownLevel = 0f
             cancelShow()
             if (!wasOn) return
-            if (!settings.enabled) {
+            if (!settings.enabled || wasDimmed) {
+                // A dimmed glyph is already dark; a fade-out would light it up just to fade.
                 stop()
             } else {
                 startShow(scope) {
@@ -167,6 +194,32 @@ class GlyphOrchestrator(
                     }
                 }
             }
+            return
+        }
+
+        if (settings.dimWhenFaceUp && faceUp) {
+            if (!wasCharging) {
+                // Plugged in face up: the session starts, silently, but still re-arms access.
+                wasCharging = true
+                lastTriggerLevel = charging.level
+                fullPlayed = charging.level >= 1f
+                scope.launch { rearm() }
+            }
+            if (!dimmed) {
+                dimmed = true
+                cancelShow()
+                shownLevel = 0f
+                stop()
+            }
+            return
+        }
+
+        if (dimmed) {
+            // Turned back over: show where the charge is now, without replaying the plug-in.
+            dimmed = false
+            cancelShow()
+            lastTriggerLevel = charging.level
+            startShow(scope) { showMeter(charging, settings) }
             return
         }
 

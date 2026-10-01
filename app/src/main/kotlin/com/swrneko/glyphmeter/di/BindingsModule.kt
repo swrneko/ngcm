@@ -2,6 +2,8 @@ package com.swrneko.glyphmeter.di
 
 import com.swrneko.glyphmeter.charging.ChargingStateSource
 import com.swrneko.glyphmeter.charging.SystemChargingStateSource
+import com.swrneko.glyphmeter.orientation.OrientationSource
+import com.swrneko.glyphmeter.orientation.SensorOrientationSource
 import com.swrneko.glyphmeter.service.ContextMeterServiceController
 import com.swrneko.glyphmeter.service.MeterServiceController
 import com.swrneko.glyphmeter.settings.DataStoreSettingsRepository
@@ -24,6 +26,9 @@ abstract class BindingsModule {
     @Binds
     @Singleton
     abstract fun bindChargingStateSource(impl: SystemChargingStateSource): ChargingStateSource
+
+    @Binds
+    abstract fun bindOrientationSource(impl: SensorOrientationSource): OrientationSource
 
     @Binds
     abstract fun bindMeterServiceController(impl: ContextMeterServiceController): MeterServiceController

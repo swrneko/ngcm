@@ -7,6 +7,8 @@ import com.swrneko.glyphmeter.charging.FakeChargingStateSource
 import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.FakeGlyphDisplay
 import com.swrneko.glyphmeter.layout.DeviceLayouts
+import com.swrneko.glyphmeter.orientation.FakeOrientationSource
+import com.swrneko.glyphmeter.orientation.OrientationSource
 import com.swrneko.glyphmeter.settings.FakeSettingsRepository
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
@@ -31,12 +33,14 @@ class GlyphOrchestratorTest {
         display: FakeGlyphDisplay,
         charging: FakeChargingStateSource,
         settings: FakeSettingsRepository,
+        orientation: OrientationSource = OrientationSource.NeverFaceUp,
         rearmAccess: suspend () -> Unit = {},
     ) = GlyphOrchestrator(
         display = display,
         chargingSource = charging,
         settingsRepository = settings,
         layout = layout,
+        orientationSource = orientation,
         rearmAccess = rearmAccess,
         reconnectDelaysMillis = reconnectDelays,
         stableSessionMillis = stableSession,
@@ -663,6 +667,149 @@ class GlyphOrchestratorTest {
         runCurrent()
 
         assertEquals(fullPresetFrames(initial, 10), display.rendered.take(10))
+
+        job.cancelAndJoin()
+    }
+
+    private val alwaysOnDimming = GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON, dimWhenFaceUp = true)
+
+    @Test
+    fun `with dimming on a face up phone keeps the glyph dark while charging`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val orientation = FakeOrientationSource(faceUp = true)
+        val job = launch {
+            orchestrator(display, charging, FakeSettingsRepository(alwaysOnDimming), orientation = orientation).run()
+        }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertTrue("nothing may be drawn face up: ${display.rendered.size} frames", display.rendered.isEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `turning a lit phone face up darkens the glyph`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val orientation = FakeOrientationSource(faceUp = false)
+        val job = launch {
+            orchestrator(display, charging, FakeSettingsRepository(alwaysOnDimming), orientation = orientation).run()
+        }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+        val before = display.turnOffCount
+
+        orientation.set(true)
+        runCurrent()
+        display.clearRendered()
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertTrue("turning face up must switch the glyph off", display.turnOffCount > before)
+        assertTrue("and the held meter must stop being redrawn", display.rendered.isEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `with dimming off a face up phone still shows the meter`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(alwaysOnDimming.copy(dimWhenFaceUp = false))
+        val job = launch {
+            orchestrator(display, charging, settings, orientation = FakeOrientationSource(faceUp = true)).run()
+        }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertTrue(display.rendered.isNotEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `turning the phone back over brings the meter back`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val orientation = FakeOrientationSource(faceUp = true)
+        val job = launch {
+            orchestrator(display, charging, FakeSettingsRepository(alwaysOnDimming), orientation = orientation).run()
+        }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        orientation.set(false)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        val last = display.rendered.last()
+        assertTrue("the meter must show the charge again", meter.take(10).all { last[it] > 0 })
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `unplugging a dimmed phone does not light it for the fade out`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val job = launch {
+            orchestrator(
+                display, charging, FakeSettingsRepository(alwaysOnDimming),
+                orientation = FakeOrientationSource(faceUp = true),
+            ).run()
+        }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        assertTrue(display.rendered.isEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `the orientation sensor runs only while charging with dimming on`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(alwaysOnDimming)
+        val orientation = FakeOrientationSource()
+        val job = launch { orchestrator(display, charging, settings, orientation = orientation).run() }
+        runCurrent()
+
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        runCurrent()
+        assertEquals("not charging: sensor off", 0, orientation.listenerCount)
+
+        charging.emit(isCharging = true, level = 0.5f)
+        runCurrent()
+        assertEquals("charging: sensor on", 1, orientation.listenerCount)
+
+        settings.update { it.copy(dimWhenFaceUp = false) }
+        runCurrent()
+        assertEquals("dimming off: sensor off", 0, orientation.listenerCount)
+
+        settings.update { it.copy(dimWhenFaceUp = true) }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        runCurrent()
+        assertEquals("unplugged: sensor off", 0, orientation.listenerCount)
 
         job.cancelAndJoin()
     }
