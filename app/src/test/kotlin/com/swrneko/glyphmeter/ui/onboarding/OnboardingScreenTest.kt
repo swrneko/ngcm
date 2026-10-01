@@ -5,7 +5,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.access.ShizukuStatus
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -25,6 +27,8 @@ class OnboardingScreenTest {
         onCopyCommand: () -> Unit = {},
         onRecheck: () -> Unit = {},
         onContinue: () -> Unit = {},
+        shizukuStatus: ShizukuStatus = ShizukuStatus.NOT_RUNNING,
+        onRequestShizuku: () -> Unit = {},
     ) {
         compose.setContent {
             OnboardingScreen(
@@ -33,6 +37,8 @@ class OnboardingScreenTest {
                 onCopyCommand = onCopyCommand,
                 onRecheck = onRecheck,
                 onContinue = onContinue,
+                shizukuStatus = shizukuStatus,
+                onRequestShizuku = onRequestShizuku,
             )
         }
     }
@@ -128,5 +134,41 @@ class OnboardingScreenTest {
         compose.onNodeWithTag("checking").assertIsDisplayed()
         compose.onNodeWithTag("continue").assertDoesNotExist()
         compose.onNodeWithTag("adb_command").assertDoesNotExist()
+    }
+
+    @Test
+    fun with_shizuku_running_the_app_can_ask_for_its_permission() {
+        var requested = false
+        show(
+            GlyphAccessState.NEEDS_SETUP,
+            shizukuStatus = ShizukuStatus.PERMISSION_NEEDED,
+            onRequestShizuku = { requested = true },
+        )
+
+        compose.onNodeWithTag("shizuku_toggle").performScrollTo().performClick()
+        compose.onNodeWithTag("shizuku_request").performScrollTo().performClick()
+
+        assertTrue(requested)
+    }
+
+    @Test
+    fun without_shizuku_running_there_is_nothing_to_ask_and_the_user_is_told_why() {
+        show(GlyphAccessState.NEEDS_SETUP, shizukuStatus = ShizukuStatus.NOT_RUNNING)
+
+        compose.onNodeWithTag("shizuku_toggle").performScrollTo().performClick()
+
+        compose.onNodeWithTag("shizuku_request").assertDoesNotExist()
+        compose.onNodeWithTag("shizuku_status").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("not running", substring = true).assertExists()
+    }
+
+    @Test
+    fun a_permanent_denial_points_the_user_to_the_shizuku_app() {
+        show(GlyphAccessState.NEEDS_SETUP, shizukuStatus = ShizukuStatus.DENIED_PERMANENTLY)
+
+        compose.onNodeWithTag("shizuku_toggle").performScrollTo().performClick()
+
+        compose.onNodeWithTag("shizuku_request").assertDoesNotExist()
+        compose.onNodeWithText("in the Shizuku app", substring = true).assertExists()
     }
 }

@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import javax.inject.Inject
+import moe.shizuku.server.IRemoteProcess
 import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
 
@@ -45,16 +46,31 @@ class ShizukuDebugModeWriter @Inject constructor() : DebugModeWriter {
     private fun runShell(command: String): String? = try {
         val binder = Shizuku.getBinder()
         val service = binder?.let { IShizukuService.Stub.asInterface(it) }
-        val process = service?.newProcess(arrayOf("sh", "-c", command), null, null)
-        val output = process?.let {
-            ParcelFileDescriptor.AutoCloseInputStream(it.inputStream).use { stream ->
-                stream.bufferedReader().readText()
-            }
-        }
-        process?.waitFor()
-        output
+        service?.newProcess(arrayOf("sh", "-c", command), null, null)?.let(::readShellOutput)
     } catch (e: Throwable) {
-        Log.w("ShizukuWriter", "shell command failed: $command", e)
+        Log.w(TAG, "shell command failed: $command", e)
         null
     }
+}
+
+private const val TAG = "ShizukuWriter"
+
+/**
+ * Reads what a Shizuku process printed and releases every pipe end it handed over.
+ *
+ * stdin is closed first so the command never waits for input; stderr is drained and logged,
+ * since an unread error pipe can block a chatty process and each unclosed end leaks a
+ * descriptor on every call.
+ */
+internal fun readShellOutput(process: IRemoteProcess): String {
+    runCatching { process.outputStream?.close() }
+    val output = ParcelFileDescriptor.AutoCloseInputStream(process.inputStream).use { stream ->
+        stream.bufferedReader().readText()
+    }
+    val errors = process.errorStream?.let { pipe ->
+        ParcelFileDescriptor.AutoCloseInputStream(pipe).use { stream -> stream.bufferedReader().readText() }
+    }
+    if (!errors.isNullOrBlank()) Log.w(TAG, "shell stderr: ${errors.trim()}")
+    process.waitFor()
+    return output
 }

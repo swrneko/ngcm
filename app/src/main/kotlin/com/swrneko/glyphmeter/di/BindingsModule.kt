@@ -1,5 +1,7 @@
 package com.swrneko.glyphmeter.di
 
+import com.swrneko.glyphmeter.access.ShizukuPermission
+import com.swrneko.glyphmeter.access.ShizukuPermissionClient
 import com.swrneko.glyphmeter.charging.ChargingStateSource
 import com.swrneko.glyphmeter.charging.SystemChargingStateSource
 import com.swrneko.glyphmeter.orientation.OrientationSource
@@ -26,6 +28,9 @@ abstract class BindingsModule {
     @Binds
     @Singleton
     abstract fun bindChargingStateSource(impl: SystemChargingStateSource): ChargingStateSource
+
+    @Binds
+    abstract fun bindShizukuPermission(impl: ShizukuPermissionClient): ShizukuPermission
 
     @Binds
     abstract fun bindOrientationSource(impl: SensorOrientationSource): OrientationSource

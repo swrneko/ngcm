@@ -37,6 +37,7 @@ import com.swrneko.glyphmeter.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.access.ShizukuStatus
 import kotlinx.coroutines.launch
 
 @Composable
@@ -46,6 +47,8 @@ fun OnboardingScreen(
     onCopyCommand: () -> Unit,
     onRecheck: () -> Unit,
     onContinue: () -> Unit,
+    shizukuStatus: ShizukuStatus,
+    onRequestShizuku: () -> Unit,
 ) {
     Scaffold { padding ->
         Box(
@@ -57,7 +60,8 @@ fun OnboardingScreen(
                 GlyphAccessState.CHECKING -> Checking()
                 GlyphAccessState.WORKING -> Confirmation(R.string.onboarding_working_body, onContinue)
                 GlyphAccessState.MANAGED_BY_APP -> Confirmation(R.string.onboarding_managed_body, onContinue)
-                GlyphAccessState.NEEDS_SETUP -> NeedsSetup(adbCommand, onCopyCommand, onRecheck)
+                GlyphAccessState.NEEDS_SETUP ->
+                    NeedsSetup(adbCommand, onCopyCommand, onRecheck, shizukuStatus, onRequestShizuku)
                 GlyphAccessState.UNSUPPORTED_DEVICE -> Unsupported()
             }
         }
@@ -121,7 +125,13 @@ private fun Unsupported() {
 }
 
 @Composable
-private fun NeedsSetup(adbCommand: String, onCopyCommand: () -> Unit, onRecheck: () -> Unit) {
+private fun NeedsSetup(
+    adbCommand: String,
+    onCopyCommand: () -> Unit,
+    onRecheck: () -> Unit,
+    shizukuStatus: ShizukuStatus,
+    onRequestShizuku: () -> Unit,
+) {
     ScreenColumn {
         Header(R.string.onboarding_setup_title, R.string.onboarding_setup_body)
 
@@ -171,12 +181,12 @@ private fun NeedsSetup(adbCommand: String, onCopyCommand: () -> Unit, onRecheck:
             Text(stringResource(R.string.onboarding_recheck))
         }
 
-        ShizukuAlternative()
+        ShizukuAlternative(shizukuStatus, onRequestShizuku)
     }
 }
 
 @Composable
-private fun ShizukuAlternative() {
+private fun ShizukuAlternative(status: ShizukuStatus, onRequest: () -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -202,6 +212,23 @@ private fun ShizukuAlternative() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag("shizuku_body"),
                 )
+                val statusText = when (status) {
+                    ShizukuStatus.NOT_RUNNING -> R.string.onboarding_shizuku_not_running
+                    ShizukuStatus.PERMISSION_NEEDED -> R.string.onboarding_shizuku_permission_needed
+                    ShizukuStatus.DENIED_PERMANENTLY -> R.string.onboarding_shizuku_denied
+                    ShizukuStatus.GRANTED -> R.string.onboarding_shizuku_granted
+                }
+                Text(
+                    text = stringResource(statusText),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.testTag("shizuku_status"),
+                )
+                if (status == ShizukuStatus.PERMISSION_NEEDED) {
+                    OutlinedButton(onClick = onRequest, modifier = Modifier.testTag("shizuku_request")) {
+                        Text(stringResource(R.string.onboarding_shizuku_request))
+                    }
+                }
             }
         }
     }
@@ -217,6 +244,7 @@ fun OnboardingRoute(
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val command = viewModel.adbCommand
+    val shizukuStatus by viewModel.shizukuStatus.collectAsStateWithLifecycle()
 
     OnboardingScreen(
         state = state,
@@ -228,5 +256,7 @@ fun OnboardingRoute(
         },
         onRecheck = viewModel::onRecheck,
         onContinue = onContinue,
+        shizukuStatus = shizukuStatus,
+        onRequestShizuku = viewModel::onRequestShizuku,
     )
 }

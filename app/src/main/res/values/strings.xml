@@ -15,7 +15,12 @@
     <string name="onboarding_once_only">You run this command only once. After that the app turns on debug mode by itself, so you will not need to return to the computer. Debug mode resets every 48 hours, and this permission is what lets the app restore it.</string>
     <string name="onboarding_recheck">Check again</string>
     <string name="onboarding_shizuku_title">No computer? Use Shizuku</string>
-    <string name="onboarding_shizuku_body">Install Shizuku, start it on your phone using wireless debugging, then allow this app in Shizuku and tap Check again.</string>
+    <string name="onboarding_shizuku_body">Install Shizuku and start it on your phone using wireless debugging. Then allow this app below. Shizuku has to be started again after every reboot.</string>
+    <string name="onboarding_shizuku_not_running">Shizuku is not running. Start it, then tap Check again.</string>
+    <string name="onboarding_shizuku_permission_needed">Shizuku is running. Allow this app to use it.</string>
+    <string name="onboarding_shizuku_denied">Access was denied. Allow Glyph Meter in the Shizuku app, then tap Check again.</string>
+    <string name="onboarding_shizuku_granted">Shizuku access is granted.</string>
+    <string name="onboarding_shizuku_request">Allow in Shizuku</string>
     <string name="onboarding_unsupported_title">Device not supported</string>
     <string name="onboarding_unsupported_body">This app needs a Nothing phone with a Glyph interface. This device is not a Nothing phone or its model is not recognized.</string>
     <string name="main_title">Glyph Meter</string>
