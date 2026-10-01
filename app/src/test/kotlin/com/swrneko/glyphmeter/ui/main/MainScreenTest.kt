@@ -156,6 +156,20 @@ class MainScreenTest {
     }
 
     @Test
+    fun the_screen_explains_that_the_glyph_preview_needs_the_app_on() {
+        show(state().copy(glyphPreviewAvailable = false))
+
+        compose.onNodeWithTag("glyph_preview_unavailable").assertExists()
+    }
+
+    @Test
+    fun the_screen_stays_quiet_when_the_glyph_preview_is_available() {
+        show(state())
+
+        compose.onNodeWithTag("glyph_preview_unavailable").assertDoesNotExist()
+    }
+
+    @Test
     fun playing_the_animation_and_opening_settings_report_back() {
         var played = false
         var settingsOpened = false

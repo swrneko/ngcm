@@ -2,11 +2,13 @@ package com.swrneko.glyphmeter.ui.main
 
 import com.swrneko.glyphmeter.access.GlyphAccessManager
 import com.swrneko.glyphmeter.charging.FakeChargingStateSource
+import com.swrneko.glyphmeter.animation.AnimationPresets
 import com.swrneko.glyphmeter.hardware.FakeGlyphDisplay
 import com.swrneko.glyphmeter.hardware.GlyphFailure
 import com.swrneko.glyphmeter.layout.DeviceLayouts
 import com.swrneko.glyphmeter.layout.MeterRenderer
 import com.swrneko.glyphmeter.model.Light
+import com.swrneko.glyphmeter.orchestration.PreviewRequestBus
 import com.swrneko.glyphmeter.service.MeterServiceController
 import com.swrneko.glyphmeter.settings.FakeSettingsRepository
 import com.swrneko.glyphmeter.settings.GlyphSettings
@@ -43,6 +45,7 @@ class MainViewModelTest {
     private val charging = FakeChargingStateSource()
     private val display = FakeGlyphDisplay()
     private val controller = RecordingController()
+    private val bus = PreviewRequestBus()
 
     @Before fun setUp() = Dispatchers.setMain(UnconfinedTestDispatcher())
 
@@ -59,6 +62,7 @@ class MainViewModelTest {
         accessManager = GlyphAccessManager(emptyList(), { supported }, { requiresDebugMode }),
         layout = layout,
         serviceController = controller,
+        previewRequestBus = bus,
         ioDispatcher = UnconfinedTestDispatcher(),
     )
 
@@ -169,6 +173,54 @@ class MainViewModelTest {
 
         assertNotNull(vm.state.value?.previewFrame)
         assertNotEquals(idle, vm.state.value?.previewFrame)
+    }
+
+    @Test
+    fun playing_the_animation_asks_the_service_for_the_wired_preset() = runTest(UnconfinedTestDispatcher()) {
+        settings.update { it.copy(wiredPresetId = AnimationPresets.CHASE.id) }
+        charging.emit(isCharging = true, level = 0.5f)
+        charging.emit(isCharging = true, level = 0.5f)
+        val vm = viewModel()
+        backgroundScope.launch { vm.state.collect {} }
+        val requested = mutableListOf<String>()
+        backgroundScope.launch { bus.requests.collect { requested += it } }
+
+        vm.onPlayPreview()
+
+        assertEquals(listOf(AnimationPresets.CHASE.id), requested)
+    }
+
+    @Test
+    fun the_glyph_preview_is_available_with_the_app_on_and_working_access() = runTest(UnconfinedTestDispatcher()) {
+        charging.emit(isCharging = true, level = 0.5f)
+        charging.emit(isCharging = true, level = 0.5f)
+        val vm = viewModel()
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(true, vm.state.value?.glyphPreviewAvailable)
+    }
+
+    @Test
+    fun the_glyph_preview_is_unavailable_when_the_app_is_switched_off() = runTest(UnconfinedTestDispatcher()) {
+        settings.update { it.copy(enabled = false) }
+        charging.emit(isCharging = true, level = 0.5f)
+        charging.emit(isCharging = true, level = 0.5f)
+        val vm = viewModel()
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(false, vm.state.value?.glyphPreviewAvailable)
+    }
+
+    @Test
+    fun the_glyph_preview_is_unavailable_when_the_phone_needs_setup() = runTest(UnconfinedTestDispatcher()) {
+        charging.emit(isCharging = true, level = 0.5f)
+        val vm = viewModel(requiresDebugMode = true)
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(false, vm.state.value?.glyphPreviewAvailable)
     }
 
     @Test

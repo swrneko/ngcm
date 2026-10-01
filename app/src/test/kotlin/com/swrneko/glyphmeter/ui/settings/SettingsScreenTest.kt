@@ -39,10 +39,16 @@ class SettingsScreenTest {
         onPresetSelected: (PresetSlot, String) -> Unit = { _, _ -> },
         onPreviewPreset: (String) -> Unit = {},
         onDimWhenFaceUpChange: (Boolean) -> Unit = {},
+        glyphPreviewAvailable: Boolean = true,
     ) {
         compose.setContent {
             SettingsScreen(
-                state = SettingsUiState(settings = settings, layout = null, previewFrame = null),
+                state = SettingsUiState(
+                    settings = settings,
+                    layout = null,
+                    previewFrame = null,
+                    glyphPreviewAvailable = glyphPreviewAvailable,
+                ),
                 onBack = {},
                 onBrightnessChange = onBrightnessChange,
                 onShowDurationChange = onShowDurationChange,
@@ -52,6 +58,20 @@ class SettingsScreenTest {
                 onDimWhenFaceUpChange = onDimWhenFaceUpChange,
             )
         }
+    }
+
+    @Test
+    fun the_screen_explains_that_the_glyph_preview_needs_the_app_on() {
+        show(glyphPreviewAvailable = false)
+
+        compose.onNodeWithTag("glyph_preview_unavailable").performScrollTo().assertExists()
+    }
+
+    @Test
+    fun the_screen_stays_quiet_when_the_glyph_preview_is_available() {
+        show(glyphPreviewAvailable = true)
+
+        compose.onNodeWithTag("glyph_preview_unavailable").assertDoesNotExist()
     }
 
     @Test

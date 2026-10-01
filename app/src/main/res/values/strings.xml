@@ -31,6 +31,7 @@
     <string name="main_preview_title">Preview</string>
     <string name="main_preview_battery">Battery %1$d%%</string>
     <string name="main_preview_play">Play animation</string>
+    <string name="preview_glyph_unavailable">The animation plays on the Glyph only while the app is switched on and has access to the Glyph.</string>
     <string name="main_mode_title">Mode</string>
     <string name="main_mode_always_on">Always</string>
     <string name="main_mode_on_event">On event</string>

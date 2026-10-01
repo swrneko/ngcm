@@ -186,6 +186,14 @@ private fun PreviewCard(state: MainUiState, onPlayPreview: () -> Unit) {
                         }
                     }
                 }
+                if (!state.glyphPreviewAvailable) {
+                    Text(
+                        text = stringResource(R.string.preview_glyph_unavailable),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("glyph_preview_unavailable"),
+                    )
+                }
             }
         }
     }

@@ -14,6 +14,7 @@ import com.swrneko.glyphmeter.hardware.RenderCapability
 import com.swrneko.glyphmeter.layout.MeterRenderer
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.model.GlyphFrameData
+import com.swrneko.glyphmeter.orchestration.PreviewRequestBus
 import com.swrneko.glyphmeter.service.MeterServiceController
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
@@ -43,6 +44,11 @@ data class MainUiState(
     val layout: DeviceLayout?,
     /** What the preview shows: a playing animation, or else the current battery level. */
     val previewFrame: GlyphFrameData?,
+    /**
+     * Whether a preview requested now can be played on the Glyph itself: only the running
+     * service draws there, and it runs only when [shouldStartService] says so.
+     */
+    val glyphPreviewAvailable: Boolean = true,
 )
 
 @HiltViewModel
@@ -53,6 +59,7 @@ class MainViewModel @Inject constructor(
     private val accessManager: GlyphAccessManager,
     private val layout: DeviceLayout?,
     private val serviceController: MeterServiceController,
+    private val previewRequestBus: PreviewRequestBus,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
@@ -77,6 +84,7 @@ class MainViewModel @Inject constructor(
             access = accessState,
             layout = layout,
             previewFrame = playing ?: idleFrame,
+            glyphPreviewAvailable = shouldStartService(accessState, settings.enabled, layout),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -120,11 +128,15 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.update { it.copy(meterMode = mode) } }
     }
 
-    /** Plays the wired-charging animation on the preview. */
+    /**
+     * Plays the wired-charging animation on the on-screen preview and asks the service to play
+     * it on the Glyph too. The request goes through the bus: only the service touches the display.
+     */
     fun onPlayPreview() {
         val current = state.value ?: return
         val layout = current.layout ?: return
         val preset = AnimationPresets.byId(current.settings.wiredPresetId) ?: AnimationPresets.FILL_UP
         player.play(preset, layout, current.settings.brightness)
+        previewRequestBus.requestPreview(preset.id)
     }
 }

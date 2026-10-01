@@ -134,6 +134,14 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
+            if (!state.glyphPreviewAvailable) {
+                Text(
+                    text = stringResource(R.string.preview_glyph_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp).testTag("glyph_preview_unavailable"),
+                )
+            }
             PresetCard(PresetSlot.WIRED, R.string.settings_slot_wired, settings.wiredPresetId, onPresetSelected, onPreviewPreset)
             PresetCard(PresetSlot.WIRELESS, R.string.settings_slot_wireless, settings.wirelessPresetId, onPresetSelected, onPreviewPreset)
             PresetCard(PresetSlot.FULL, R.string.settings_slot_full, settings.fullPresetId, onPresetSelected, onPreviewPreset)

@@ -2,7 +2,10 @@ package com.swrneko.glyphmeter.service
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
+import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.GlyphFailure
+import com.swrneko.glyphmeter.orchestration.PreviewRequestBus
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
@@ -32,6 +35,7 @@ class GlyphMeterServiceTest {
     @get:Rule val hilt = HiltAndroidRule(this)
 
     @Inject lateinit var controller: MeterServiceController
+    @Inject lateinit var previewBus: PreviewRequestBus
 
     private val application: Application get() = ApplicationProvider.getApplicationContext()
 
@@ -62,6 +66,21 @@ class GlyphMeterServiceTest {
 
         assertTrue("nothing was drawn while charging", awaitCondition { GlueFakes.display.rendered.isNotEmpty() })
         assertFalse(shadowOf(service.get()).isStoppedBySelf)
+    }
+
+    @Test
+    fun `a preview request on the shared bus is drawn on the glyph by the running service`() {
+        createService()
+        assertTrue(awaitCondition { GlueFakes.display.isConnected })
+        runBlocking { GlueFakes.charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE) }
+
+        // The request is dropped if the service is not listening yet, so ask until it answers.
+        val drawn = awaitCondition {
+            previewBus.requestPreview(AnimationPresets.CHASE.id)
+            GlueFakes.display.rendered.isNotEmpty()
+        }
+
+        assertTrue("the preview never reached the glyph", drawn)
     }
 
     @Test
