@@ -45,26 +45,17 @@ object MeterRenderer {
     }
 
     /**
-     * All-or-nothing fallback, used when per-segment brightness is unavailable.
+     * Percentage of the meter zone shown by [frame], for the stepped fallback.
      *
-     * Also lights [DeviceLayout.progressAnchorIndex], because `displayProgress` throws
-     * a `GlyphException` unless that segment is present in the frame.
+     * The SDK's `displayProgress` only takes a percentage, so the fallback has to read it back
+     * out of the frame. A segment that is lit at all counts as a whole step, including the
+     * partly glowing leading one: 63% of a twenty-segment meter lights thirteen segments and is
+     * reported as 65%. This is the only stepped implementation; an empty meter zone yields 0
+     * because this path is the last line of defense and must never throw.
      */
-    fun stepped(level: Float, layout: DeviceLayout, brightness: Int): GlyphFrameData {
-        val segments = IntArray(layout.segmentCount)
+    fun steppedPercent(frame: GlyphFrameData, layout: DeviceLayout): Int {
         val meter = layout.meterZone.indices
-        val clampedLevel = level.coerceIn(0f, 1f)
-        val clampedBrightness = brightness.coerceIn(0, Light.MAX)
-
-        val wholeSegments = floor(clampedLevel * meter.size).toInt()
-
-        for (i in 0 until wholeSegments) {
-            segments[meter[i]] = clampedBrightness
-        }
-        if (wholeSegments > 0) {
-            segments[layout.progressAnchorIndex] = clampedBrightness
-        }
-
-        return GlyphFrameData(segments)
+        if (meter.isEmpty()) return 0
+        return meter.count { frame[it] > 0 } * 100 / meter.size
     }
 }

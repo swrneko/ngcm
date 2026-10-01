@@ -1,5 +1,7 @@
 package com.swrneko.glyphmeter.layout
 
+import com.swrneko.glyphmeter.model.GlyphFrameData
+import com.swrneko.glyphmeter.model.GlyphZone
 import com.swrneko.glyphmeter.model.Light
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -99,19 +101,30 @@ class MeterRendererTest {
     }
 
     @Test
-    fun `the stepped renderer uses whole segments only`() {
-        val frame = MeterRenderer.stepped(level = 0.63f, layout = layout, brightness = full)
+    fun `the stepped percentage counts a partly lit leading segment as a whole step`() {
+        val frame = MeterRenderer.smooth(level = 0.63f, layout = layout, brightness = full)
 
-        val lit = meter.map { frame[it] }
-
-        assertTrue("stepped output must be all-or-nothing", lit.all { it == 0 || it == full })
-        assertEquals(12, lit.count { it == full })
+        assertEquals(65, MeterRenderer.steppedPercent(frame, layout))
     }
 
     @Test
-    fun `the stepped renderer always lights the progress anchor when anything is lit`() {
-        val frame = MeterRenderer.stepped(level = 0.1f, layout = layout, brightness = full)
+    fun `the stepped percentage is zero for a dark frame and hundred for a full one`() {
+        assertEquals(0, MeterRenderer.steppedPercent(MeterRenderer.smooth(0f, layout, full), layout))
+        assertEquals(100, MeterRenderer.steppedPercent(MeterRenderer.smooth(1f, layout, full), layout))
+    }
 
-        assertTrue(frame[layout.progressAnchorIndex] > 0)
+    @Test
+    fun `the stepped percentage ignores segments outside the meter zone`() {
+        val segments = IntArray(layout.segmentCount)
+        for (index in layout.zone("A").indices) segments[index] = full
+
+        assertEquals(0, MeterRenderer.steppedPercent(GlyphFrameData(segments), layout))
+    }
+
+    @Test
+    fun `a meter zone without segments yields zero instead of dividing by zero`() {
+        val empty = layout.copy(zones = listOf(GlyphZone(id = "C", indices = emptyList())))
+
+        assertEquals(0, MeterRenderer.steppedPercent(GlyphFrameData(IntArray(layout.segmentCount)), empty))
     }
 }

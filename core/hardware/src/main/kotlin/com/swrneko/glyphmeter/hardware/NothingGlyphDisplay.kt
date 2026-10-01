@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.nothing.ketchum.Glyph
 import com.nothing.ketchum.GlyphManager
+import com.swrneko.glyphmeter.layout.MeterRenderer
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.model.GlyphFrameData
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,8 +24,9 @@ private const val SERVICE_CONNECT_TIMEOUT_MS = 5_000L
  * `channel.set(i, light)` internally, so [GlyphFrameData] needs no translation.
  *
  * The per-segment overload is undocumented. If a Nothing OS update removes it, the
- * first render throws and this class permanently downgrades to
- * [RenderCapability.STEPPED_ONLY] rather than going dark.
+ * first render throws and the session downgrades to [RenderCapability.STEPPED_ONLY]
+ * rather than going dark. The downgrade lasts only as long as the session: a lost
+ * connection resets the status, and every new session tries per-segment brightness again.
  */
 class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
 
@@ -153,8 +155,7 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
     }
 
     private fun renderStepped(manager: GlyphManager, frame: GlyphFrameData, layout: DeviceLayout) {
-        val meter = layout.meterZone.indices
-        val percent = steppedMeterPercent(meterSize = meter.size, litCount = meter.count { frame[it] > 0 })
+        val percent = MeterRenderer.steppedPercent(frame, layout)
 
         try {
             val builder = manager.glyphFrameBuilder
@@ -203,14 +204,3 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
         else -> null
     }
 }
-
-/**
- * Percentage of the meter zone considered lit, used by the stepped fallback renderer.
- *
- * Pulled out as a plain top-level function (no Glyph SDK types involved) so it stays
- * unit-testable even though [NothingGlyphDisplay] itself is not: an empty meter zone
- * must yield 0 rather than divide by zero, since this path is the last line of defense
- * and must never throw.
- */
-internal fun steppedMeterPercent(meterSize: Int, litCount: Int): Int =
-    if (meterSize == 0) 0 else (litCount * 100) / meterSize
