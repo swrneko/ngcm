@@ -6,6 +6,7 @@ import com.swrneko.glyphmeter.access.DebugModeWriter
 import com.swrneko.glyphmeter.access.GlyphAccessManager
 import com.swrneko.glyphmeter.access.SecureSettingsDebugModeWriter
 import com.swrneko.glyphmeter.access.ShizukuDebugModeWriter
+import com.swrneko.glyphmeter.access.requiresDebugMode
 import com.swrneko.glyphmeter.hardware.GlyphDeviceDetector
 import com.swrneko.glyphmeter.hardware.GlyphDisplay
 import com.swrneko.glyphmeter.hardware.NothingGlyphDisplay
@@ -15,14 +16,14 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
-
-    /** Nothing OS 4.0 (Android 16, API 36) dropped the developer-key requirement. */
-    private const val FIRST_API_WITHOUT_DEBUG_MODE = 36
 
     @Provides
     @Singleton
@@ -46,7 +47,21 @@ object AppModule {
         return GlyphAccessManager(
             writers = writers,
             isDeviceSupported = { GlyphDeviceDetector.detect() != null },
-            requiresDebugMode = { Build.VERSION.SDK_INT < FIRST_API_WITHOUT_DEBUG_MODE },
+            requiresDebugMode = { requiresDebugMode(Build.VERSION.SDK_INT) },
         )
     }
+
+    // SINGLE-THREAD REQUIREMENT, DO NOT "OPTIMISE" AWAY, AND DO NOT CREATE ANOTHER ONE:
+    // every limitedParallelism(1) call makes an INDEPENDENT one-thread context, so this must
+    // stay a single application-wide singleton shared by all service instances. Otherwise a
+    // stopping service (turnOff + disconnect) and a freshly started one (connect + render)
+    // would enter the Nothing SDK concurrently and the old disconnect would kill the new
+    // session. The orchestrator also keeps unguarded state (heldFrame, shownLevel, ...)
+    // shared by its two coroutines and its check-then-render is not atomic; on a
+    // multi-threaded dispatcher the glyph could stay lit after charging stops.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Provides
+    @Singleton
+    @GlyphDispatcher
+    fun provideGlyphDispatcher(): CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
 }
