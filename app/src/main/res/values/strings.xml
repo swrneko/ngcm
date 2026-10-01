@@ -4,4 +4,18 @@
     <string name="service_notification_title">Glyph Meter</string>
     <string name="service_notification_text">Showing charge level on the Glyph interface</string>
     <string name="service_channel_name">Glyph service</string>
+    <string name="onboarding_ready_title">Glyph is ready</string>
+    <string name="onboarding_working_body">Your phone lets this app use the Glyph interface. Nothing else to set up.</string>
+    <string name="onboarding_managed_body">The app has permission to turn on Glyph debug mode itself and will keep doing so. Nothing else to set up.</string>
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_setup_title">One-time setup needed</string>
+    <string name="onboarding_setup_body">Your phone blocks Glyph control for third-party apps by default. Connect it to a computer with USB debugging enabled and run the command below.</string>
+    <string name="onboarding_command_label">Run on your computer</string>
+    <string name="onboarding_copy_command">Copy command</string>
+    <string name="onboarding_once_only">You run this command only once. After that the app turns on debug mode by itself, so you will not need to return to the computer. Debug mode resets every 48 hours, and this permission is what lets the app restore it.</string>
+    <string name="onboarding_recheck">Check again</string>
+    <string name="onboarding_shizuku_title">No computer? Use Shizuku</string>
+    <string name="onboarding_shizuku_body">Install Shizuku, start it on your phone using wireless debugging, then allow this app in Shizuku and tap Check again.</string>
+    <string name="onboarding_unsupported_title">Device not supported</string>
+    <string name="onboarding_unsupported_body">This app needs a Nothing phone with a Glyph interface. This device is not a Nothing phone or its model is not recognized.</string>
 </resources>
