@@ -5,11 +5,14 @@ import android.content.Context
 import android.content.Intent
 import com.swrneko.glyphmeter.access.GlyphAccessManager
 import com.swrneko.glyphmeter.access.shouldStartOnBoot
+import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val TAG = "BootReceiver"
 
 /**
  * Re-arms the app after a reboot.
@@ -31,8 +34,12 @@ class BootReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 if (shouldStartOnBoot(accessManager.evaluate())) GlyphMeterService.start(context)
+            } catch (e: Throwable) {
+                // Last path to a process crash: a failing access check or a refused foreground
+                // start (background start restrictions) must not take the app down at boot.
+                Log.e(TAG, "Boot start failed", e)
             } finally {
-                pending.finish()
+                pending?.finish()
             }
         }
     }
