@@ -14,7 +14,7 @@ object DeviceLayouts {
     /**
      * Nothing Phone (3a) and (3a) Pro. Both report the same device id.
      *
-     * Verified: A_1..A_11 = 20..30, B_1..B_5 = 31..35, C_1..C_20 = 0..19.
+     * Indices read from the SDK bytecode, not yet checked on a device: A_1..A_11 = 20..30, B_1..B_5 = 31..35, C_1..C_20 = 0..19.
      * Zone C is the long strip and runs bottom-left to top-right, which makes it
      * the natural battery meter.
      */
@@ -29,7 +29,8 @@ object DeviceLayouts {
         ),
         meterZoneId = "C",
         progressAnchorIndex = 0,
-        hardwareVerified = true,
+        // Stays false until the layout has been checked on a physical phone.
+        hardwareVerified = false,
     )
 
     val all: List<DeviceLayout> = listOf(PHONE_3A)

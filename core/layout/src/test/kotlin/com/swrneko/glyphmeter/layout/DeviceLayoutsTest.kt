@@ -1,6 +1,7 @@
 package com.swrneko.glyphmeter.layout
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -57,5 +58,12 @@ class DeviceLayoutsTest {
     fun `lookup by device id finds a known device and rejects an unknown one`() {
         assertNotNull(DeviceLayouts.byDeviceId("24111"))
         assertNull(DeviceLayouts.byDeviceId("not-a-nothing-phone"))
+    }
+
+    @Test
+    fun `no layout claims hardware verification before it was checked on a device`() {
+        for (layout in DeviceLayouts.all) {
+            assertFalse("layout ${layout.deviceId} was never run on hardware", layout.hardwareVerified)
+        }
     }
 }
