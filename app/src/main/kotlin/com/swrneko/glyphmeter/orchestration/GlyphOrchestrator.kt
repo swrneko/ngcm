@@ -13,6 +13,7 @@ import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
 import com.swrneko.glyphmeter.settings.SettingsRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -34,12 +35,18 @@ private const val REFRESH_INTERVAL_MILLIS = 500L
  *
  * Deliberately free of Android types so it can be driven by fakes on virtual time.
  * Owns no clock of its own: every wait goes through [delay], which `runTest` controls.
+ *
+ * [rearmAccess] switches the Glyph debug flag back on when the app is allowed to (it expires
+ * after 48 hours on older Nothing OS). It runs before every connect and on every plug-in, so a
+ * phone that is never rebooted keeps working. Failures inside it are ignored: connecting is
+ * still worth a try.
  */
 class GlyphOrchestrator(
     private val display: GlyphDisplay,
     private val chargingSource: ChargingStateSource,
     private val settingsRepository: SettingsRepository,
     private val layout: DeviceLayout,
+    private val rearmAccess: suspend () -> Unit = {},
     private val frameIntervalMillis: Long = 16,
 ) {
 
@@ -52,6 +59,7 @@ class GlyphOrchestrator(
     private var heldFrame: GlyphFrameData? = null
 
     suspend fun run() {
+        rearm()
         display.connect(layout).onFailure { return }
 
         coroutineScope {
@@ -118,6 +126,7 @@ class GlyphOrchestrator(
             shownLevel = 0f
             lastTriggerLevel = charging.level
             startShow(scope) {
+                rearm()
                 play(PresetFrameSource(presetFor(charging, settings), layout, settings.brightness))
                 showMeter(charging, settings)
             }
@@ -197,6 +206,16 @@ class GlyphOrchestrator(
 
     private fun stop() {
         display.turnOff()
+    }
+
+    private suspend fun rearm() {
+        try {
+            rearmAccess()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Best effort: without re-arming a connect may still succeed (Nothing OS 4.0+).
+        }
     }
 
     private fun presetFor(charging: ChargingState, settings: GlyphSettings): AnimationPreset {

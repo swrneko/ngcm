@@ -25,6 +25,10 @@ class FakeGlyphDisplay : GlyphDisplay {
     var turnOffCount: Int = 0
         private set
 
+    /** Number of [connect] calls, successful or not. */
+    var connectCount: Int = 0
+        private set
+
     /** Result the next [connect] should produce. */
     var connectResult: Result<Unit> = Result.success(Unit)
 
@@ -34,6 +38,7 @@ class FakeGlyphDisplay : GlyphDisplay {
     fun clearRendered() = _rendered.clear()
 
     override suspend fun connect(layout: DeviceLayout): Result<Unit> {
+        connectCount++
         if (connectResult.isFailure) {
             isConnected = false
             _capability.value = RenderCapability.UNAVAILABLE

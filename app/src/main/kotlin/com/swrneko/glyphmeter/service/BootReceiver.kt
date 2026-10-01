@@ -14,8 +14,9 @@ import javax.inject.Inject
 /**
  * Re-arms the app after a reboot.
  *
- * Evaluating access here is what makes the 48-hour debug-mode expiry invisible: if the
- * app holds WRITE_SECURE_SETTINGS it simply switches the flag back on.
+ * Evaluating access here switches the debug flag back on right after boot when the app holds
+ * WRITE_SECURE_SETTINGS. Between reboots the running service does the same before every
+ * connect and on every plug-in, which is what keeps the 48-hour expiry invisible.
  */
 @AndroidEntryPoint
 class BootReceiver : BroadcastReceiver() {

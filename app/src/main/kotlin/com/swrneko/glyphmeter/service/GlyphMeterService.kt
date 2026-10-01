@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.swrneko.glyphmeter.R
+import com.swrneko.glyphmeter.access.GlyphAccessManager
 import com.swrneko.glyphmeter.charging.ChargingStateSource
 import com.swrneko.glyphmeter.di.GlyphDispatcher
 import com.swrneko.glyphmeter.hardware.GlyphDisplay
@@ -22,9 +23,11 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -39,6 +42,7 @@ class GlyphMeterService : Service() {
     @Inject lateinit var chargingSource: ChargingStateSource
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var layoutProvider: Provider<DeviceLayout?>
+    @Inject lateinit var accessManager: GlyphAccessManager
 
     /** Application-wide single thread, see AppModule.provideGlyphDispatcher. Never create one here. */
     @Inject @GlyphDispatcher lateinit var glyphDispatcher: CoroutineDispatcher
@@ -79,6 +83,9 @@ class GlyphMeterService : Service() {
             chargingSource = chargingSource,
             settingsRepository = settingsRepository,
             layout = layout,
+            // Debug mode expires after 48 hours; re-arm it before every connect and on every
+            // plug-in. evaluate() may reach Shizuku over IPC, so it never runs on the glyph thread.
+            rearmAccess = { withContext(Dispatchers.IO) { accessManager.evaluate() } },
         )
 
         // ATOMIC: the body runs (and its finally with it) even if the job is cancelled before

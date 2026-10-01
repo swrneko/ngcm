@@ -29,11 +29,13 @@ class GlyphOrchestratorTest {
         display: FakeGlyphDisplay,
         charging: FakeChargingStateSource,
         settings: FakeSettingsRepository,
+        rearmAccess: suspend () -> Unit = {},
     ) = GlyphOrchestrator(
         display = display,
         chargingSource = charging,
         settingsRepository = settings,
         layout = layout,
+        rearmAccess = rearmAccess,
         frameIntervalMillis = 16,
     )
 
@@ -366,5 +368,61 @@ class GlyphOrchestratorTest {
 
         assertTrue(wired.isNotEmpty() && wireless.isNotEmpty())
         assertNotEquals(wired, wireless)
+    }
+
+    @Test
+    fun `access is re armed before the first connect`() = runTest {
+        val display = FakeGlyphDisplay()
+        val connectsSeenByRearm = mutableListOf<Int>()
+        val job = launch {
+            orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()) {
+                connectsSeenByRearm += display.connectCount
+            }.run()
+        }
+        runCurrent()
+
+        assertEquals("re-arm must run once, before any connect", listOf(0), connectsSeenByRearm)
+        assertEquals(1, display.connectCount)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a failed re arm does not stop the orchestrator from connecting`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch {
+            orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()) {
+                error("secure settings unavailable")
+            }.run()
+        }
+        runCurrent()
+
+        assertTrue(display.isConnected)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `every plug in re arms access`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        var rearms = 0
+        val job = launch {
+            orchestrator(display, charging, FakeSettingsRepository()) { rearms++ }.run()
+        }
+        runCurrent()
+        val afterConnect = rearms
+
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(3_000)
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(3_000)
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        assertEquals("one re-arm per plug-in", afterConnect + 2, rearms)
+
+        job.cancelAndJoin()
     }
 }
