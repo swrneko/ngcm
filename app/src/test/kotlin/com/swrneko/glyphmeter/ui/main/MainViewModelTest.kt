@@ -15,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -46,38 +47,92 @@ class MainViewModelTest {
 
     @After fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel(layout: com.swrneko.glyphmeter.model.DeviceLayout? = this.layout) = MainViewModel(
+    private fun viewModel(
+        layout: com.swrneko.glyphmeter.model.DeviceLayout? = this.layout,
+        supported: Boolean = true,
+        requiresDebugMode: Boolean = false,
+    ) = MainViewModel(
         settingsRepository = settings,
         chargingSource = charging,
         display = display,
-        accessManager = GlyphAccessManager(emptyList(), { true }, { false }),
+        accessManager = GlyphAccessManager(emptyList(), { supported }, { requiresDebugMode }),
         layout = layout,
         serviceController = controller,
     )
 
     @Test
-    fun showing_the_screen_does_not_start_the_service() = runTest(UnconfinedTestDispatcher()) {
-        charging.emit(isCharging = true, level = 0.4f)
+    fun first_showing_with_the_app_on_and_working_access_starts_the_service() = runTest(UnconfinedTestDispatcher()) {
         val vm = viewModel()
-
         backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
 
-        assertEquals(0, controller.starts)
+        assertEquals(1, controller.starts)
         assertEquals(0, controller.stops)
     }
 
     @Test
-    fun the_switch_starts_and_stops_the_service_and_stores_the_choice() = runTest(UnconfinedTestDispatcher()) {
-        charging.emit(isCharging = true, level = 0.4f)
+    fun an_unsupported_phone_does_not_start_the_service() = runTest(UnconfinedTestDispatcher()) {
+        val vm = viewModel(supported = false)
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(0, controller.starts)
+    }
+
+    @Test
+    fun a_phone_without_a_known_layout_does_not_start_the_service() = runTest(UnconfinedTestDispatcher()) {
+        val vm = viewModel(layout = null)
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(0, controller.starts)
+    }
+
+    @Test
+    fun a_switched_off_app_does_not_start_the_service() = runTest(UnconfinedTestDispatcher()) {
+        settings.update { it.copy(enabled = false) }
         val vm = viewModel()
         backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(0, controller.starts)
+    }
+
+    @Test
+    fun a_phone_that_needs_setup_does_not_start_the_service() = runTest(UnconfinedTestDispatcher()) {
+        val vm = viewModel(requiresDebugMode = true)
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(0, controller.starts)
+    }
+
+    @Test
+    fun the_switch_stops_the_service_and_starts_it_again_after_storing_the_choice() = runTest(UnconfinedTestDispatcher()) {
+        val vm = viewModel()
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(1, controller.starts)
 
         vm.onEnabledChange(false)
         assertEquals(1, controller.stops)
         assertFalse(settings.settings.first().enabled)
 
         vm.onEnabledChange(true)
-        assertEquals(1, controller.starts)
+        assertEquals(2, controller.starts)
+        assertEquals(true, settings.settings.first().enabled)
+    }
+
+    @Test
+    fun the_switch_does_not_start_the_service_on_an_unsupported_phone() = runTest(UnconfinedTestDispatcher()) {
+        settings.update { it.copy(enabled = false) }
+        val vm = viewModel(supported = false)
+        backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+
+        vm.onEnabledChange(true)
+
+        assertEquals(0, controller.starts)
         assertEquals(true, settings.settings.first().enabled)
     }
 

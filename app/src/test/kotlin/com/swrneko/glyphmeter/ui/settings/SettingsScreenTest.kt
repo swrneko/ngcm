@@ -1,5 +1,6 @@
 package com.swrneko.glyphmeter.ui.settings
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsEnabled
@@ -11,10 +12,12 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import com.swrneko.glyphmeter.model.Light
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -95,6 +98,25 @@ class SettingsScreenTest {
             .performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
 
         assertEquals(Light.MIN_VISIBLE, reported)
+    }
+
+    @Test
+    fun a_slider_reports_only_when_the_gesture_ends() {
+        val reported = mutableListOf<Int>()
+        show(GlyphSettings.Default.copy(brightness = 2000), onBrightnessChange = { reported += it })
+
+        compose.onNodeWithTag("brightness_slider").performTouchInput {
+            down(center)
+            moveBy(Offset(40f, 0f))
+            moveBy(Offset(40f, 0f))
+        }
+        compose.waitForIdle()
+        assertEquals(emptyList<Int>(), reported)
+
+        compose.onNodeWithTag("brightness_slider").performTouchInput { up() }
+        compose.waitForIdle()
+        assertEquals(1, reported.size)
+        assertTrue(reported.single() > 2000)
     }
 
     @Test

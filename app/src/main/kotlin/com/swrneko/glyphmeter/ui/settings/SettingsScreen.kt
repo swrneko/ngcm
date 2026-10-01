@@ -28,6 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -164,14 +167,18 @@ private fun LabeledSlider(
     tag: String,
     onValueChange: (Float) -> Unit,
 ) {
+    // Follow the finger locally and store only when the gesture ends: every stored change
+    // restarts the settings flow and makes the orchestrator re-apply the Glyph.
+    var dragValue by remember(sliderValue) { mutableFloatStateOf(sliderValue) }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         }
         Slider(
-            value = sliderValue,
-            onValueChange = onValueChange,
+            value = dragValue,
+            onValueChange = { dragValue = it },
+            onValueChangeFinished = { onValueChange(dragValue) },
             valueRange = range,
             enabled = enabled,
             modifier = Modifier.testTag(tag),

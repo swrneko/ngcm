@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swrneko.glyphmeter.access.GlyphAccessManager
 import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.access.shouldStartService
 import com.swrneko.glyphmeter.animation.AnimationPresets
 import com.swrneko.glyphmeter.charging.ChargingStateSource
 import com.swrneko.glyphmeter.hardware.GlyphDisplay
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,13 +78,24 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             // Evaluation may talk to Shizuku or secure settings, keep it off the main thread.
             access.value = withContext(Dispatchers.IO) { accessManager.evaluate() }
+            // The app is on by default, so a fresh install must start the service without
+            // waiting for the user to flip the switch. Doing it here (not on every resume)
+            // keeps rotation and trips to settings from repeating it.
+            val enabled = settingsRepository.settings.first().enabled
+            if (shouldStartService(access.value, enabled, layout)) serviceController.start()
         }
     }
 
-    /** Turns the whole app on or off. The service follows this switch, and only this switch. */
+    /** Turns the whole app on or off. The service follows once the choice is stored. */
     fun onEnabledChange(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.update { it.copy(enabled = enabled) } }
-        if (enabled) serviceController.start() else serviceController.stop()
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(enabled = enabled) }
+            if (shouldStartService(access.value, enabled, layout)) {
+                serviceController.start()
+            } else if (!enabled) {
+                serviceController.stop()
+            }
+        }
     }
 
     fun onModeChange(mode: MeterMode) {
