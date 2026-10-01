@@ -68,6 +68,25 @@ class GlyphAccessManagerTest {
     }
 
     @Test
+    fun `debug mode already on is reported as managed when the app can keep it on`() {
+        val writer = StubWriter(isAvailable = true, debugOn = true, canEnable = true)
+
+        val state = manager(listOf(writer)).evaluate()
+
+        // WORKING would claim the phone works without setup, about a flag that expires in 48 hours.
+        assertEquals(GlyphAccessState.MANAGED_BY_APP, state)
+    }
+
+    @Test
+    fun `debug mode already on is still working when the only capable writer fails`() {
+        val writer = StubWriter(isAvailable = true, debugOn = true, canEnable = false)
+
+        val state = manager(listOf(writer)).evaluate()
+
+        assertEquals(GlyphAccessState.WORKING, state)
+    }
+
+    @Test
     fun `an available writer turns debug mode on by itself`() {
         val writer = StubWriter(isAvailable = true, debugOn = false, canEnable = true)
 

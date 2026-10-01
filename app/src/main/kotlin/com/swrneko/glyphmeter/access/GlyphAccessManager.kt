@@ -20,12 +20,14 @@ class GlyphAccessManager(
         if (!isDeviceSupported()) return GlyphAccessState.UNSUPPORTED_DEVICE
         if (!requiresDebugMode()) return GlyphAccessState.WORKING
 
-        if (writers.any { it.isDebugModeOn() }) return GlyphAccessState.WORKING
-
+        // Writers with rights go first: a flag that is on right now still expires after 48 hours,
+        // so "works directly" is only true when nobody needs to keep it on.
         for (writer in writers) {
             if (!writer.isAvailable) continue
             if (writer.enableDebugMode()) return GlyphAccessState.MANAGED_BY_APP
         }
+
+        if (writers.any { it.isDebugModeOn() }) return GlyphAccessState.WORKING
 
         return GlyphAccessState.NEEDS_SETUP
     }
