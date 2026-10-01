@@ -38,10 +38,11 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
     @Volatile private var sessionOpen = false
 
     override suspend fun connect(layout: DeviceLayout): Result<Unit> {
-        if (sessionOpen && this.layout == layout) return Result.success(Unit)
-        // Reconnecting with a different layout must not stack a second session on top
-        // of the one already open: close it first so the SDK never sees two openSession
-        // calls without a closeSession between them.
+        val usable = _capability.value != RenderCapability.UNAVAILABLE
+        if (sessionOpen && this.layout == layout && usable) return Result.success(Unit)
+        // Reconnecting with a different layout, or over a session whose rendering has failed
+        // completely, must not stack a second session on top of the one already open: close it
+        // first so the SDK never sees two openSession calls without a closeSession between them.
         if (sessionOpen) disconnect()
 
         this.layout = layout

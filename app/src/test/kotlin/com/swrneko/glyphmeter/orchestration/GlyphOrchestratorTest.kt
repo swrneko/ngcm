@@ -36,8 +36,13 @@ class GlyphOrchestratorTest {
         settingsRepository = settings,
         layout = layout,
         rearmAccess = rearmAccess,
+        reconnectDelaysMillis = reconnectDelays,
+        stableSessionMillis = stableSession,
         frameIntervalMillis = 16,
     )
+
+    private val reconnectDelays = listOf(100L, 200L, 400L)
+    private val stableSession = 1_000L
 
     @Test
     fun `it connects to the display when it starts`() = runTest {
@@ -424,5 +429,159 @@ class GlyphOrchestratorTest {
         assertEquals("one re-arm per plug-in", afterConnect + 2, rearms)
 
         job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a lost session is reconnected`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch { orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()).run() }
+        runCurrent()
+
+        display.loseConnection()
+        advanceTimeBy(reconnectDelays.first() + 1)
+        runCurrent()
+
+        assertTrue("the display must be connected again", display.isConnected)
+        assertEquals(2, display.connectCount)
+        assertTrue("the orchestrator must keep running", job.isActive)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `access is re armed before every reconnect attempt`() = runTest {
+        val display = FakeGlyphDisplay()
+        val connectsSeenByRearm = mutableListOf<Int>()
+        val job = launch {
+            orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()) {
+                connectsSeenByRearm += display.connectCount
+            }.run()
+        }
+        runCurrent()
+
+        display.connectResult = Result.failure(IllegalStateException("register rejected"))
+        display.loseConnection()
+        advanceTimeBy(reconnectDelays.sum() + 1)
+        runCurrent()
+
+        assertEquals("one re-arm before each of the connects", listOf(0, 1, 2, 3), connectsSeenByRearm)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `reconnect attempts wait longer each time`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch { orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()).run() }
+        runCurrent()
+        display.connectResult = Result.failure(IllegalStateException("register rejected"))
+
+        display.loseConnection()
+        advanceTimeBy(99)
+        runCurrent()
+        assertEquals("no attempt before the first pause", 1, display.connectCount)
+
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals(2, display.connectCount)
+
+        advanceTimeBy(198)
+        runCurrent()
+        assertEquals("the second pause is longer", 2, display.connectCount)
+
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals(3, display.connectCount)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `reconnecting gives up after a bounded number of attempts and the run ends`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch { orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()).run() }
+        runCurrent()
+        display.connectResult = Result.failure(IllegalStateException("register rejected"))
+
+        display.loseConnection()
+        advanceTimeBy(60_000)
+        runCurrent()
+
+        assertEquals("one initial connect plus one per pause", 1 + reconnectDelays.size, display.connectCount)
+        assertTrue("run() must return once it has given up", job.isCompleted)
+    }
+
+    @Test
+    fun `a reconnect that succeeds on a later attempt keeps the orchestrator running`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch { orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()).run() }
+        runCurrent()
+        display.connectResult = Result.failure(IllegalStateException("register rejected"))
+
+        display.loseConnection()
+        advanceTimeBy(reconnectDelays[0] + 1)
+        runCurrent()
+        display.connectResult = Result.success(Unit)
+        advanceTimeBy(reconnectDelays[1])
+        runCurrent()
+
+        assertTrue(display.isConnected)
+        assertTrue(job.isActive)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `after a reconnect the always on meter is drawn again`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON))
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        display.loseConnection()
+        display.clearRendered()
+        advanceTimeBy(reconnectDelays.first() + 1_000)
+        runCurrent()
+
+        assertTrue("the held meter must come back after reconnecting", display.rendered.isNotEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `every new loss gets a fresh budget of attempts`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch { orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()).run() }
+        runCurrent()
+
+        repeat(reconnectDelays.size + 2) {
+            display.loseConnection()
+            advanceTimeBy(reconnectDelays.first() + stableSession + 1)
+            runCurrent()
+        }
+
+        assertTrue(display.isConnected)
+        assertTrue(job.isActive)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a session that keeps dropping right after reconnecting still runs out of attempts`() = runTest {
+        val display = FakeGlyphDisplay()
+        val job = launch { orchestrator(display, FakeChargingStateSource(), FakeSettingsRepository()).run() }
+        runCurrent()
+
+        repeat(reconnectDelays.size + 1) {
+            display.loseConnection()
+            advanceTimeBy(reconnectDelays.last() + 1)
+            runCurrent()
+        }
+
+        assertTrue("a flapping service must not keep the orchestrator alive forever", job.isCompleted)
     }
 }

@@ -9,6 +9,7 @@ import com.swrneko.glyphmeter.charging.ChargingState
 import com.swrneko.glyphmeter.charging.ChargingStateSource
 import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.GlyphDisplay
+import com.swrneko.glyphmeter.hardware.RenderCapability
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
@@ -17,6 +18,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,6 +33,12 @@ import kotlin.math.roundToInt
 private const val LEVEL_TRANSITION_MILLIS = 500L
 private const val REFRESH_INTERVAL_MILLIS = 500L
 
+/** Pauses before each reconnect attempt after a lost session; their count bounds the attempts. */
+val DEFAULT_RECONNECT_DELAYS_MILLIS: List<Long> = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L)
+
+/** A session that survives this long counts as recovered, and the next loss gets a fresh budget. */
+private const val STABLE_SESSION_MILLIS = 60_000L
+
 /**
  * Decides what the Glyph shows and when.
  *
@@ -40,6 +49,12 @@ private const val REFRESH_INTERVAL_MILLIS = 500L
  * after 48 hours on older Nothing OS). It runs before every connect and on every plug-in, so a
  * phone that is never rebooted keeps working. Failures inside it are ignored: connecting is
  * still worth a try.
+ *
+ * A lost session ([RenderCapability.UNAVAILABLE]) is reconnected with a bounded number of
+ * attempts, one after each pause in [reconnectDelaysMillis]. When they are used up [run]
+ * returns, so the caller can stop instead of idling as a zombie. A session that drops again
+ * within [stableSessionMillis] keeps spending the same budget, so a flapping service cannot
+ * make the attempts endless.
  */
 class GlyphOrchestrator(
     private val display: GlyphDisplay,
@@ -47,6 +62,8 @@ class GlyphOrchestrator(
     private val settingsRepository: SettingsRepository,
     private val layout: DeviceLayout,
     private val rearmAccess: suspend () -> Unit = {},
+    private val reconnectDelaysMillis: List<Long> = DEFAULT_RECONNECT_DELAYS_MILLIS,
+    private val stableSessionMillis: Long = STABLE_SESSION_MILLIS,
     private val frameIntervalMillis: Long = 16,
 ) {
 
@@ -63,14 +80,45 @@ class GlyphOrchestrator(
         display.connect(layout).onFailure { return }
 
         coroutineScope {
-            launch { refreshHeldFrame() }
-            try {
-                observe(this)
-            } finally {
-                heldFrame = null
-                stop()
+            val refresher = launch { refreshHeldFrame() }
+            val observer = launch {
+                try {
+                    observe(this)
+                } finally {
+                    heldFrame = null
+                    stop()
+                }
             }
+            // Returns only when reconnecting has given up.
+            keepConnected()
+            observer.cancelAndJoin()
+            refresher.cancelAndJoin()
         }
+    }
+
+    /** Waits for a lost session and reconnects it, until the attempts for one outage run out. */
+    private suspend fun keepConnected() {
+        while (true) {
+            display.capability.first { it == RenderCapability.UNAVAILABLE }
+            if (!reconnect()) return
+        }
+    }
+
+    /** True once a session is back and has stayed up for [stableSessionMillis]. */
+    private suspend fun reconnect(): Boolean {
+        for (pause in reconnectDelaysMillis) {
+            delay(pause)
+            rearm()
+            val connected = display.connect(layout).isSuccess &&
+                display.capability.value != RenderCapability.UNAVAILABLE
+            if (!connected) continue
+
+            val lostAgain = withTimeoutOrNull(stableSessionMillis) {
+                display.capability.first { it == RenderCapability.UNAVAILABLE }
+            }
+            if (lostAgain == null) return true
+        }
+        return false
     }
 
     private suspend fun observe(scope: CoroutineScope) {

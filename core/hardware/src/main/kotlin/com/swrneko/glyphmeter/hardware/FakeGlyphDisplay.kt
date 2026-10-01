@@ -59,6 +59,12 @@ class FakeGlyphDisplay : GlyphDisplay {
         _rendered.clear()
     }
 
+    /** Simulates the Glyph service going away under an open session. */
+    fun loseConnection() {
+        isConnected = false
+        _capability.value = RenderCapability.UNAVAILABLE
+    }
+
     override fun disconnect() {
         isConnected = false
         _capability.value = RenderCapability.UNKNOWN
