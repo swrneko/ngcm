@@ -31,9 +31,11 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
     private val _capability = MutableStateFlow(RenderCapability.UNKNOWN)
     override val capability: StateFlow<RenderCapability> = _capability.asStateFlow()
 
-    private var manager: GlyphManager? = null
+    // Volatile: the SDK reports a lost service on the main thread, everything else runs on the
+    // glyph dispatcher.
+    @Volatile private var manager: GlyphManager? = null
     private var layout: DeviceLayout? = null
-    private var sessionOpen = false
+    @Volatile private var sessionOpen = false
 
     override suspend fun connect(layout: DeviceLayout): Result<Unit> {
         if (sessionOpen && this.layout == layout) return Result.success(Unit)
@@ -57,8 +59,7 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
                     }
 
                     override fun onServiceDisconnected(name: android.content.ComponentName?) {
-                        sessionOpen = false
-                        _capability.value = RenderCapability.UNAVAILABLE
+                        onSessionLost(instance)
                     }
                 })
                 // If the caller's coroutine is cancelled (navigated away) or the timeout
@@ -71,10 +72,12 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
             }
         } ?: return fail("timed out waiting for the Glyph service")
 
-        if (!bound) return fail("Glyph service refused the connection")
+        if (!bound) return failAndRelease(instance, "Glyph service refused the connection")
 
+        // From here on the service is bound: every failure must unbind it again, or each failed
+        // attempt would leave one more ServiceConnection registered in the GlyphManager singleton.
         if (!instance.register(deviceId)) {
-            return fail("register($deviceId) was rejected; check the Glyph permission and debug mode")
+            return failAndRelease(instance, "register($deviceId) was rejected; check the Glyph permission and debug mode")
         }
 
         return try {
@@ -84,8 +87,32 @@ class NothingGlyphDisplay(private val context: Context) : GlyphDisplay {
             _capability.value = RenderCapability.PER_SEGMENT
             Result.success(Unit)
         } catch (e: Throwable) {
-            fail("openSession failed: ${e.message}")
+            failAndRelease(instance, "openSession failed: ${e.message}")
         }
+    }
+
+    /**
+     * The Glyph service went away under an open session. Android would keep the dead binding
+     * and silently rebind later, so it is released here and the next [connect] starts clean.
+     * Capability is published last, so whoever reacts to [RenderCapability.UNAVAILABLE] by
+     * reconnecting never races the unbind.
+     */
+    private fun onSessionLost(instance: GlyphManager) {
+        // Only a live session can be lost. A failed or finished connect has already unbound;
+        // reacting again would unbind twice.
+        if (manager !== instance) return
+        Log.w(TAG, "Glyph service disconnected")
+        sessionOpen = false
+        manager = null
+        runCatching { instance.unInit() }
+            .onFailure { Log.w(TAG, "unInit after a lost session failed", it) }
+        _capability.value = RenderCapability.UNAVAILABLE
+    }
+
+    private fun failAndRelease(instance: GlyphManager, reason: String): Result<Unit> {
+        runCatching { instance.unInit() }
+            .onFailure { Log.w(TAG, "unInit after a failed connect failed", it) }
+        return fail(reason)
     }
 
     override fun render(frame: GlyphFrameData) {

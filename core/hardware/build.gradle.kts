@@ -15,6 +15,11 @@ android {
     kotlin {
         jvmToolchain(17)
     }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 dependencies {
     api(project(":core:model"))
@@ -32,4 +37,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    // Tests only: lets Robolectric drive the real NothingGlyphDisplay against the real
+    // GlyphManager. Production code still sees the SDK as compileOnly, see above.
+    testImplementation(libs.glyph.matrix.sdk) {
+        artifact { type = "aar" }
+    }
 }
