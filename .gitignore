@@ -5,3 +5,6 @@ build/
 .idea/
 .kotlin/
 .superpowers/
+keystore.properties
+*.jks
+*.keystore
