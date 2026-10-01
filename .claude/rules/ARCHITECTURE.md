@@ -8,7 +8,7 @@ Android-приложение: показ уровня заряда на Glyph-и
 - Jetpack Compose (BOM 2026.09), Material 3, Navigation Compose
 - Hilt (DI, через KSP), DataStore Preferences (настройки)
 - Glyph Matrix SDK 2.0 (локальный `.aar`, `core/hardware/libs/`), Shizuku (запасной путь доступа)
-- Тесты: JUnit 4, kotlinx-coroutines-test, Turbine, Robolectric 4.17 (`sdk=34`), Compose UI test
+- Тесты: JUnit 4, kotlinx-coroutines-test, Turbine, Robolectric 4.17 (`sdk=34`), Hilt testing, Compose UI test
 - minSdk 33, targetSdk 36; версии — в `gradle/libs.versions.toml`
 
 ## Команды
@@ -41,12 +41,13 @@ Android-приложение: показ уровня заряда на Glyph-и
 Подробные документы `.claude/docs/modules/<slug>.md` пока не созданы; ниже только однострочные описания.
 
 - `:core:model` — модели данных: `Light`, `DeviceLayout`, `GlyphZone`, `GlyphFrameData`. Чистая JVM.
-- `:core:layout` — таблица раскладок устройств (`DeviceLayouts`, сейчас Phone (3a)) и `MeterRenderer` (плавный и ступенчатый кадр уровня). Чистая JVM.
+- `:core:layout` — таблица раскладок устройств (`DeviceLayouts`, сейчас Phone (3a), `hardwareVerified = false` до проверки на устройстве) и `MeterRenderer` (плавный кадр уровня и единственный расчёт процента для ступенчатого запасного режима, `steppedPercent`). Чистая JVM.
 - `:core:animation` — пресеты подключения, кривые, `MeterTransition`, `PresetFrameSource`; время приходит параметром. Чистая JVM.
 - `:core:hardware` — `GlyphDisplay`, `NothingGlyphDisplay`, `FakeGlyphDisplay`, определение устройства. Единственный, кто знает `com.nothing.ketchum`; SDK как `compileOnly`.
 - `:app` — пакет `com.swrneko.glyphmeter`:
   - `access` — состояния доступа к Glyph, debug-режим, политики запуска, writer'ы (secure settings, Shizuku);
   - `charging` — источник состояния зарядки (система и фейк);
+  - `orientation` — источник «телефон лежит экраном вверх» (датчик и фейк), активен только во время зарядки;
   - `orchestration` — `GlyphOrchestrator`, сценарии показа;
   - `service` — foreground-сервис (`specialUse`), `BootReceiver`, контроллер сервиса;
   - `settings` — `GlyphSettings` и репозиторий на DataStore;
