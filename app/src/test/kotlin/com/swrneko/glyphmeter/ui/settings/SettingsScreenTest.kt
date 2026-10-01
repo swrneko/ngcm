@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
@@ -22,6 +23,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import kotlin.math.roundToInt
 
 /** Renders the real [SettingsScreen] under Robolectric and asserts through UI nodes. */
 @RunWith(RobolectricTestRunner::class)
@@ -117,6 +119,27 @@ class SettingsScreenTest {
         compose.waitForIdle()
         assertEquals(1, reported.size)
         assertTrue(reported.single() > 2000)
+    }
+
+    @Test
+    fun the_label_follows_the_slider_during_a_drag_before_anything_is_stored() {
+        val reported = mutableListOf<Int>()
+        show(GlyphSettings.Default.copy(brightness = Light.MAX), onBrightnessChange = { reported += it })
+        compose.onNodeWithText("100%").assertExists()
+
+        compose.onNodeWithTag("brightness_slider").performTouchInput {
+            down(center)
+            moveBy(Offset(-40f, 0f))
+            moveBy(Offset(-40f, 0f))
+        }
+        compose.waitForIdle()
+
+        assertEquals(emptyList<Int>(), reported)
+        val current = compose.onNodeWithTag("brightness_slider").fetchSemanticsNode()
+            .config[SemanticsProperties.ProgressBarRangeInfo].current
+        assertTrue("current=$current", current < Light.MAX)
+        compose.onNodeWithText("100%").assertDoesNotExist()
+        compose.onNodeWithText("${current.roundToInt() * 100 / Light.MAX}%").assertExists()
     }
 
     @Test

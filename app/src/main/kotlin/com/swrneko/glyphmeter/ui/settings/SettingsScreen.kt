@@ -160,7 +160,7 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 @Composable
 private fun LabeledSlider(
     label: String,
-    value: String,
+    formatValue: @Composable (Float) -> String,
     sliderValue: Float,
     range: ClosedFloatingPointRange<Float>,
     enabled: Boolean,
@@ -173,7 +173,7 @@ private fun LabeledSlider(
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text(formatValue(dragValue), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         }
         Slider(
             value = dragValue,
@@ -193,7 +193,7 @@ private fun BrightnessCard(brightness: Int, onBrightnessChange: (Int) -> Unit) {
     SettingsCard {
         LabeledSlider(
             label = stringResource(R.string.settings_brightness_title),
-            value = stringResource(R.string.settings_brightness_value, shown * 100 / Light.MAX),
+            formatValue = { stringResource(R.string.settings_brightness_value, it.roundToInt() * 100 / Light.MAX) },
             sliderValue = shown.toFloat(),
             range = Light.MIN_VISIBLE.toFloat()..Light.MAX.toFloat(),
             enabled = true,
@@ -224,7 +224,7 @@ private fun EventCard(
         }
         LabeledSlider(
             label = stringResource(R.string.settings_show_duration),
-            value = stringResource(R.string.settings_show_duration_value, seconds),
+            formatValue = { stringResource(R.string.settings_show_duration_value, it.roundToInt()) },
             sliderValue = seconds.toFloat(),
             range = MIN_SHOW_SECONDS.toFloat()..MAX_SHOW_SECONDS.toFloat(),
             enabled = enabled,
@@ -233,7 +233,7 @@ private fun EventCard(
         )
         LabeledSlider(
             label = stringResource(R.string.settings_repeat_step),
-            value = stringResource(R.string.settings_repeat_step_value, step),
+            formatValue = { stringResource(R.string.settings_repeat_step_value, it.roundToInt()) },
             sliderValue = step.toFloat(),
             range = MIN_REPEAT_STEP_PERCENT.toFloat()..MAX_REPEAT_STEP_PERCENT.toFloat(),
             enabled = enabled,
