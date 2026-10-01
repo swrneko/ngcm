@@ -19,7 +19,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -65,6 +68,13 @@ private const val STABLE_SESSION_MILLIS = 60_000L
  * With [GlyphSettings.dimWhenFaceUp] on, the Glyph stays dark while [orientationSource] says the
  * phone lies screen up. Orientation is collected only while charging with that setting on, so
  * the sensor behind it never runs otherwise.
+ *
+ * [previewRequests] carries preset ids the user asked to see on the Glyph. They are handled in
+ * the same sequence as battery and settings events, so the UI never writes to the display. A
+ * preview is an explicit action: it is not suppressed by [GlyphSettings.dimWhenFaceUp] and plays
+ * without charging too. It cancels the running show (or an earlier preview), plays the preset at
+ * the configured brightness and then goes back to the meter if charging, or to darkness if not.
+ * It is ignored while the app is switched off.
  */
 class GlyphOrchestrator(
     private val display: GlyphDisplay,
@@ -73,6 +83,7 @@ class GlyphOrchestrator(
     private val layout: DeviceLayout,
     private val orientationSource: OrientationSource = OrientationSource.NeverFaceUp,
     private val rearmAccess: suspend () -> Unit = {},
+    private val previewRequests: Flow<String> = emptyFlow(),
     private val reconnectDelaysMillis: List<Long> = DEFAULT_RECONNECT_DELAYS_MILLIS,
     private val stableSessionMillis: Long = STABLE_SESSION_MILLIS,
     private val frameIntervalMillis: Long = 16,
@@ -88,6 +99,17 @@ class GlyphOrchestrator(
     /** The full-charge preset has played in this charging session; reset on unplug. */
     private var fullPlayed = false
     private var showJob: Job? = null
+
+    /** A preview started by a request is playing, so non-charging events must not cut it short. */
+    private var previewActive = false
+
+    /** Latest battery and settings seen by [observe]; null until the first event. */
+    private var latest: Pair<ChargingState, GlyphSettings>? = null
+
+    private sealed interface Event {
+        data class State(val charging: ChargingState, val settings: GlyphSettings, val faceUp: Boolean) : Event
+        data class Preview(val presetId: String) : Event
+    }
 
     /** Frame the always-on refresher re-sends; null whenever something else owns the display. */
     private var heldFrame: GlyphFrameData? = null
@@ -140,7 +162,7 @@ class GlyphOrchestrator(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun observe(scope: CoroutineScope) {
-        combine(chargingSource.state, settingsRepository.settings) { charging, settings ->
+        val states: Flow<Event> = combine(chargingSource.state, settingsRepository.settings) { charging, settings ->
             charging to settings
         }.flatMapLatest { (charging, settings) ->
             if (charging.isCharging && settings.enabled && settings.dimWhenFaceUp) {
@@ -150,8 +172,44 @@ class GlyphOrchestrator(
             } else {
                 flowOf(Triple(charging, settings, false))
             }
-        }.collect { (charging, settings, faceUp) ->
-            handle(scope, charging, settings, faceUp)
+        }.map { (charging, settings, faceUp) -> Event.State(charging, settings, faceUp) }
+
+        // One collector for both, so a preview and a battery event are never handled concurrently.
+        merge(states, previewRequests.map { Event.Preview(it) }).collect { event ->
+            when (event) {
+                is Event.State -> {
+                    latest = event.charging to event.settings
+                    handle(scope, event.charging, event.settings, event.faceUp)
+                }
+
+                is Event.Preview -> startPreview(scope, event.presetId)
+            }
+        }
+    }
+
+    private suspend fun startPreview(scope: CoroutineScope, presetId: String) {
+        val (_, settings) = latest ?: return
+        if (!settings.enabled) return
+        val preset = AnimationPresets.byId(presetId) ?: return
+
+        heldFrame = null
+        cancelShow()
+        previewActive = true
+        startShow(scope) {
+            try {
+                play(PresetFrameSource(preset, layout, settings.brightness))
+                previewActive = false
+                val (charging, current) = latest ?: return@startShow
+                if (wasCharging && !dimmed) {
+                    shownLevel = 0f
+                    showMeter(charging, current)
+                }
+            } finally {
+                previewActive = false
+                // While charging, whatever takes over (the meter, a plug-in animation) owns the
+                // display from here; otherwise nothing may be left lit.
+                if (!wasCharging || dimmed) stop()
+            }
         }
     }
 
@@ -172,6 +230,9 @@ class GlyphOrchestrator(
         heldFrame = null
 
         if (!settings.enabled || !charging.isCharging) {
+            // A preview on an idle phone is not a charging session: settings or battery noise
+            // must not cut it short. Switching the app off still does.
+            if (!wasCharging && previewActive && settings.enabled) return
             val wasOn = wasCharging
             val wasDimmed = dimmed
             wasCharging = false

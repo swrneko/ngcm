@@ -2,10 +2,12 @@ package com.swrneko.glyphmeter.orchestration
 
 import app.cash.turbine.test
 import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.animation.AnimationPreset
 import com.swrneko.glyphmeter.animation.PresetFrameSource
 import com.swrneko.glyphmeter.charging.FakeChargingStateSource
 import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.FakeGlyphDisplay
+import com.swrneko.glyphmeter.model.GlyphFrameData
 import com.swrneko.glyphmeter.layout.DeviceLayouts
 import com.swrneko.glyphmeter.orientation.FakeOrientationSource
 import com.swrneko.glyphmeter.orientation.OrientationSource
@@ -34,6 +36,7 @@ class GlyphOrchestratorTest {
         charging: FakeChargingStateSource,
         settings: FakeSettingsRepository,
         orientation: OrientationSource = OrientationSource.NeverFaceUp,
+        previews: PreviewRequestBus = PreviewRequestBus(),
         rearmAccess: suspend () -> Unit = {},
     ) = GlyphOrchestrator(
         display = display,
@@ -42,6 +45,7 @@ class GlyphOrchestratorTest {
         layout = layout,
         orientationSource = orientation,
         rearmAccess = rearmAccess,
+        previewRequests = previews.requests,
         reconnectDelaysMillis = reconnectDelays,
         stableSessionMillis = stableSession,
         frameIntervalMillis = 16,
@@ -810,6 +814,149 @@ class GlyphOrchestratorTest {
         charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
         runCurrent()
         assertEquals("unplugged: sensor off", 0, orientation.listenerCount)
+
+        job.cancelAndJoin()
+    }
+
+    // ---- preview requests from the UI ----
+
+    /** Every frame the preset can produce at the orchestrator's 16 ms step, at full brightness. */
+    private fun framesOf(preset: AnimationPreset, brightness: Int = GlyphSettings.Default.brightness): Set<GlyphFrameData> {
+        val source = PresetFrameSource(preset, layout, brightness)
+        return (0..source.durationMillis step 16).map { source.frameAt(it) }.toSet()
+    }
+
+    @Test
+    fun `a preview request without charging plays the preset frames and then darkens the glyph`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val bus = PreviewRequestBus()
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(), previews = bus).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        runCurrent()
+        val before = display.turnOffCount
+
+        bus.requestPreview(AnimationPresets.CHASE.id)
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertTrue("the preset must be drawn", display.rendered.isNotEmpty())
+        assertTrue(
+            "only chase frames may be drawn",
+            framesOf(AnimationPresets.CHASE).containsAll(display.rendered),
+        )
+
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertTrue("the glyph must go dark afterwards", display.turnOffCount > before)
+        assertTrue("and stay dark", display.rendered.isEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a preview request while charging interrupts the meter plays the preset and brings the meter back`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val bus = PreviewRequestBus()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON))
+        val job = launch { orchestrator(display, charging, settings, previews = bus).run() }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(5_000)
+        runCurrent()
+        val meterFrame = display.rendered.last()
+        val chase = framesOf(AnimationPresets.CHASE)
+        assertTrue("the held meter must differ from the preset", meterFrame !in chase)
+
+        bus.requestPreview(AnimationPresets.CHASE.id)
+        runCurrent()
+        display.clearRendered()
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertTrue("the preset must replace the meter", display.rendered.isNotEmpty())
+        assertTrue("no meter frames while the preset plays", chase.containsAll(display.rendered))
+
+        advanceTimeBy(3_000)
+        runCurrent()
+        display.clearRendered()
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertTrue("the meter must be held again", display.rendered.isNotEmpty())
+        assertTrue("with the same level as before", display.rendered.all { it == meterFrame })
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `dimming for a face up phone does not suppress a preview`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val bus = PreviewRequestBus()
+        val job = launch {
+            orchestrator(
+                display, charging, FakeSettingsRepository(alwaysOnDimming),
+                orientation = FakeOrientationSource(faceUp = true), previews = bus,
+            ).run()
+        }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f)
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertTrue("face up: dark", display.rendered.isEmpty())
+        val before = display.turnOffCount
+
+        bus.requestPreview(AnimationPresets.CHASE.id)
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertTrue("the preview must be drawn face up", display.rendered.isNotEmpty())
+        assertTrue(framesOf(AnimationPresets.CHASE).containsAll(display.rendered))
+
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        assertTrue("and then the glyph goes dark again", display.turnOffCount > before)
+        assertTrue(display.rendered.isEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a new preview request replaces the one still playing`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val bus = PreviewRequestBus()
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(), previews = bus).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        runCurrent()
+
+        bus.requestPreview(AnimationPresets.CHASE.id)
+        advanceTimeBy(300)
+        runCurrent()
+        val before = display.turnOffCount
+
+        bus.requestPreview(AnimationPresets.FLASH.id)
+        runCurrent()
+        display.clearRendered()
+        advanceTimeBy(100)
+        runCurrent()
+
+        assertTrue("the new preset must be drawn", display.rendered.isNotEmpty())
+        assertTrue("only flash frames now", framesOf(AnimationPresets.FLASH).containsAll(display.rendered))
+
+        // Flash ends 600 ms after the second request; chase would have run until 1 000 ms
+        // after the first, i.e. 700 ms after the second.
+        advanceTimeBy(650)
+        runCurrent()
+
+        assertTrue("the second preview ends with darkness", display.turnOffCount > before)
+        assertTrue("the first one must not draw on", display.rendered.isEmpty())
 
         job.cancelAndJoin()
     }
