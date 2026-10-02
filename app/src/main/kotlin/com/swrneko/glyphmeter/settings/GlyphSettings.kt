@@ -1,6 +1,11 @@
 package com.swrneko.glyphmeter.settings
 
+import com.swrneko.glyphmeter.animation.AnimationParams
+import com.swrneko.glyphmeter.animation.AnimationPreset
 import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.animation.PresetFrameSource
+import com.swrneko.glyphmeter.animation.defaultParams
+import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.model.Light
 
 enum class MeterMode {
@@ -25,7 +30,16 @@ data class GlyphSettings(
     val fullPresetId: String,
     /** Skip lighting up while the phone lies screen-up. */
     val dimWhenFaceUp: Boolean,
+    /** Tuning per animation, keyed by preset id. A preset without an entry plays as shipped. */
+    val animationParams: Map<String, AnimationParams> = emptyMap(),
 ) {
+    fun paramsFor(preset: AnimationPreset): AnimationParams =
+        animationParams[preset.id] ?: preset.defaultParams
+
+    /** [preset] as tuned here; its brightness falls back to [brightness], the meter's. */
+    fun frameSource(preset: AnimationPreset, layout: DeviceLayout, chargeLevel: Float): PresetFrameSource =
+        PresetFrameSource(preset, layout, brightness, paramsFor(preset), chargeLevel)
+
     companion object {
         val Default = GlyphSettings(
             enabled = true,

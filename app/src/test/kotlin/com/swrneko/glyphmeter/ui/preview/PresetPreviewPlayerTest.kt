@@ -1,6 +1,8 @@
 package com.swrneko.glyphmeter.ui.preview
 
+import com.swrneko.glyphmeter.animation.AnimationPreset
 import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.animation.PresetFrameSource
 import com.swrneko.glyphmeter.layout.DeviceLayouts
 import com.swrneko.glyphmeter.model.Light
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +19,8 @@ class PresetPreviewPlayerTest {
 
     private val layout = DeviceLayouts.PHONE_3A
 
+    private fun source(preset: AnimationPreset) = PresetFrameSource(preset, layout, Light.MAX)
+
     @Test
     fun nothing_is_playing_until_asked() = runTest {
         val player = PresetPreviewPlayer(backgroundScope, nowMillis = { testScheduler.currentTime })
@@ -29,7 +33,7 @@ class PresetPreviewPlayerTest {
         val player = PresetPreviewPlayer(backgroundScope, nowMillis = { testScheduler.currentTime })
         val preset = AnimationPresets.FLASH
 
-        player.play(preset, layout, Light.MAX)
+        player.play(source(preset))
         runCurrent()
         advanceTimeBy(preset.durationMillis / 4)
         assertNotNull(player.frame.value)
@@ -52,10 +56,10 @@ class PresetPreviewPlayerTest {
     fun starting_another_preset_replaces_the_running_one() = runTest {
         val player = PresetPreviewPlayer(backgroundScope, nowMillis = { testScheduler.currentTime })
 
-        player.play(AnimationPresets.BREATHE, layout, Light.MAX)
+        player.play(source(AnimationPresets.BREATHE))
         runCurrent()
         advanceTimeBy(400)
-        player.play(AnimationPresets.FLASH, layout, Light.MAX)
+        player.play(source(AnimationPresets.FLASH))
         runCurrent()
         advanceTimeBy(AnimationPresets.FLASH.durationMillis + 50)
         runCurrent()

@@ -72,8 +72,9 @@ private const val STABLE_SESSION_MILLIS = 60_000L
  * [previewRequests] carries preset ids the user asked to see on the Glyph. They are handled in
  * the same sequence as battery and settings events, so the UI never writes to the display. A
  * preview is an explicit action: it is not suppressed by [GlyphSettings.dimWhenFaceUp] and plays
- * without charging too. It cancels the running show (or an earlier preview), plays the preset at
- * the configured brightness and then goes back to the meter if charging, or to darkness if not.
+ * without charging too. It cancels the running show (or an earlier preview), plays the preset as
+ * tuned in [GlyphSettings.animationParams] and then goes back to the meter if charging, or to
+ * darkness if not.
  * It is ignored while the app is switched off.
  */
 class GlyphOrchestrator(
@@ -188,7 +189,7 @@ class GlyphOrchestrator(
     }
 
     private suspend fun startPreview(scope: CoroutineScope, presetId: String) {
-        val (_, settings) = latest ?: return
+        val (state, settings) = latest ?: return
         if (!settings.enabled) return
         val preset = AnimationPresets.byId(presetId) ?: return
 
@@ -197,11 +198,12 @@ class GlyphOrchestrator(
         previewActive = true
         startShow(scope) {
             try {
-                play(PresetFrameSource(preset, layout, settings.brightness))
+                val source = settings.frameSource(preset, layout, state.level)
+                play(source)
                 previewActive = false
                 val (charging, current) = latest ?: return@startShow
                 if (wasCharging && !dimmed) {
-                    shownLevel = 0f
+                    shownLevel = source.handoffLevel ?: 0f
                     showMeter(charging, current)
                 }
             } finally {
@@ -295,7 +297,7 @@ class GlyphOrchestrator(
             fullPlayed = charging.level >= 1f
             startShow(scope) {
                 rearm()
-                play(PresetFrameSource(presetFor(charging, settings), layout, settings.brightness))
+                playThenHandOver(settings.frameSource(presetFor(charging, settings), layout, charging.level))
                 showMeter(charging, settings)
             }
             return
@@ -307,8 +309,7 @@ class GlyphOrchestrator(
             lastTriggerLevel = charging.level
             cancelShow()
             startShow(scope) {
-                play(PresetFrameSource(fullPreset(settings), layout, settings.brightness))
-                shownLevel = 0f
+                playThenHandOver(settings.frameSource(fullPreset(settings), layout, charging.level))
                 showMeter(charging, settings)
             }
             return
@@ -368,6 +369,15 @@ class GlyphOrchestrator(
                 shownLevel = 0f
             }
         }
+    }
+
+    /**
+     * Plays a plug-in animation and leaves [shownLevel] where it ended, so the meter that follows
+     * rises from darkness, or carries on from the frame a fill to the charge level stopped on.
+     */
+    private suspend fun playThenHandOver(source: PresetFrameSource) {
+        play(source)
+        shownLevel = source.handoffLevel ?: 0f
     }
 
     /** Keeps the final frame on screen without spinning the CPU. */

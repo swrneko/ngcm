@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.swrneko.glyphmeter.ui.animation.AnimationSettingsRoute
 import com.swrneko.glyphmeter.ui.main.MainRoute
 import com.swrneko.glyphmeter.ui.onboarding.OnboardingRoute
 import com.swrneko.glyphmeter.ui.settings.SettingsRoute
@@ -26,7 +27,9 @@ class MainActivity : ComponentActivity() {
                     main = { onOpenSettings, onOpenOnboarding ->
                         MainRoute(onOpenSettings = onOpenSettings, onOpenOnboarding = onOpenOnboarding)
                     },
-                    settings = { onBack -> SettingsRoute(onBack = onBack) },
+                    settings = { onBack, onOpenAnimation -> SettingsRoute(onBack = onBack, onOpenAnimation = onOpenAnimation) },
+                    // The animation's id reaches its view model through the navigation arguments.
+                    animation = { _, onBack -> AnimationSettingsRoute(onBack = onBack) },
                 )
             }
         }

@@ -35,9 +35,15 @@ class GlyphMeterNavHostTest {
                         Button(onClick = onOpenOnboarding, modifier = Modifier.testTag("main_to_onboarding")) { Text("o") }
                     }
                 },
-                settings = { onBack ->
+                settings = { onBack, onOpenAnimation ->
                     Column(Modifier.testTag("screen_settings")) {
                         Button(onClick = onBack, modifier = Modifier.testTag("settings_back")) { Text("b") }
+                        Button(onClick = { onOpenAnimation("wave") }, modifier = Modifier.testTag("settings_to_wave")) { Text("w") }
+                    }
+                },
+                animation = { presetId, onBack ->
+                    Column(Modifier.testTag("screen_animation_$presetId")) {
+                        Button(onClick = onBack, modifier = Modifier.testTag("animation_back")) { Text("b") }
                     }
                 },
             )
@@ -113,5 +119,17 @@ class GlyphMeterNavHostTest {
 
         compose.onNodeWithTag("onboarding_continue").performClick()
         compose.onNodeWithTag("screen_main").assertExists()
+    }
+
+    @Test
+    fun settings_opens_one_animation_and_back_returns_to_settings() {
+        show(GlyphAccessState.WORKING)
+        compose.onNodeWithTag("main_to_settings").performClick()
+
+        compose.onNodeWithTag("settings_to_wave").performClick()
+        compose.onNodeWithTag("screen_animation_wave").assertExists()
+
+        compose.onNodeWithTag("animation_back").performClick()
+        compose.onNodeWithTag("screen_settings").assertExists()
     }
 }

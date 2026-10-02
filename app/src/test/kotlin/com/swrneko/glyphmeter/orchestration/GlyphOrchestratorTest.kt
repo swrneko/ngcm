@@ -1,7 +1,9 @@
 package com.swrneko.glyphmeter.orchestration
 
 import app.cash.turbine.test
+import com.swrneko.glyphmeter.animation.AnimationParams
 import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.animation.FillTarget
 import com.swrneko.glyphmeter.animation.AnimationPreset
 import com.swrneko.glyphmeter.animation.PresetFrameSource
 import com.swrneko.glyphmeter.charging.FakeChargingStateSource
@@ -9,6 +11,7 @@ import com.swrneko.glyphmeter.charging.PowerSource
 import com.swrneko.glyphmeter.hardware.FakeGlyphDisplay
 import com.swrneko.glyphmeter.model.GlyphFrameData
 import com.swrneko.glyphmeter.layout.DeviceLayouts
+import com.swrneko.glyphmeter.layout.MeterRenderer
 import com.swrneko.glyphmeter.orientation.FakeOrientationSource
 import com.swrneko.glyphmeter.orientation.OrientationSource
 import com.swrneko.glyphmeter.settings.FakeSettingsRepository
@@ -957,6 +960,78 @@ class GlyphOrchestratorTest {
 
         assertTrue("the second preview ends with darkness", display.turnOffCount > before)
         assertTrue("the first one must not draw on", display.rendered.isEmpty())
+
+        job.cancelAndJoin()
+    }
+
+    // ---- tuned animations ----
+
+    @Test
+    fun `plugging in plays the animation as tuned`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val initial = GlyphSettings.Default.copy(
+            animationParams = mapOf("fill_up" to AnimationParams(cycleMillis = 2_000, brightness = 1_000, zoneIds = setOf("A"))),
+        )
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(initial)).run() }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        val tuned = initial.frameSource(AnimationPresets.FILL_UP, layout, 0.5f)
+        assertEquals((0 until 20).map { tuned.frameAt(it * 16L) }, display.rendered.take(20))
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a fill to the charge level hands over to the meter without going dark`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val initial = GlyphSettings.Default.copy(
+            meterMode = MeterMode.ALWAYS_ON,
+            animationParams = mapOf("fill_up" to AnimationParams(cycleMillis = 1_000, fillTarget = FillTarget.CHARGE_LEVEL)),
+        )
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(initial)).run() }
+        runCurrent()
+        val offsBefore = display.turnOffCount
+
+        charging.emit(isCharging = true, level = 0.6f, source = PowerSource.WIRED)
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        val frames = display.rendered
+        val firstLit = frames.indexOfFirst { frame -> frame.segments.any { it > 0 } }
+        assertEquals("no turn-off between the animation and the meter", offsBefore, display.turnOffCount)
+        assertTrue("no dark frame after the fill started", frames.drop(firstLit).all { frame -> frame.segments.any { it > 0 } })
+        assertEquals(MeterRenderer.smooth(0.6f, layout, initial.brightness), frames.last())
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a preview plays the animation as tuned`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val bus = PreviewRequestBus()
+        val initial = GlyphSettings.Default.copy(
+            animationParams = mapOf("breathe" to AnimationParams(cycleMillis = 600, repeats = 2, brightness = 1_200)),
+        )
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(initial), previews = bus).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        runCurrent()
+
+        bus.requestPreview(AnimationPresets.BREATHE.id)
+        runCurrent()
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        val tuned = initial.frameSource(AnimationPresets.BREATHE, layout, 0.5f)
+        assertEquals((0 until 60).map { tuned.frameAt(it * 16L) }, display.rendered.take(60))
+        assertEquals("at its own brightness", 1_200, display.rendered.maxOf { it.segments.max() })
 
         job.cancelAndJoin()
     }

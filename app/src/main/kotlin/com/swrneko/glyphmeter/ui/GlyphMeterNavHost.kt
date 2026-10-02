@@ -12,11 +12,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.swrneko.glyphmeter.access.GlyphAccessState
+import com.swrneko.glyphmeter.ui.animation.AnimationSettingsViewModel
 
 object Routes {
     const val ONBOARDING = "onboarding"
     const val MAIN = "main"
     const val SETTINGS = "settings"
+    const val ANIMATION = "animation/{${AnimationSettingsViewModel.PRESET_ID}}"
+
+    fun animation(presetId: String): String = "animation/$presetId"
 
     /** A phone whose Glyph access already works goes straight to the main screen. */
     fun startFor(access: GlyphAccessState): String = when (access) {
@@ -26,7 +30,7 @@ object Routes {
 }
 
 /**
- * Navigation between the three screens. Screens come in as slots so the graph can be
+ * Navigation between the screens. Screens come in as slots so the graph can be
  * exercised without the dependency injection graph.
  *
  * While [access] is still being checked nothing is navigated, so the first screen is the
@@ -37,7 +41,8 @@ fun GlyphMeterNavHost(
     access: GlyphAccessState,
     onboarding: @Composable (onContinue: () -> Unit) -> Unit,
     main: @Composable (onOpenSettings: () -> Unit, onOpenOnboarding: () -> Unit) -> Unit,
-    settings: @Composable (onBack: () -> Unit) -> Unit,
+    settings: @Composable (onBack: () -> Unit, onOpenAnimation: (presetId: String) -> Unit) -> Unit,
+    animation: @Composable (presetId: String, onBack: () -> Unit) -> Unit,
     navController: NavHostController = rememberNavController(),
 ) {
     if (access == GlyphAccessState.CHECKING) {
@@ -63,7 +68,11 @@ fun GlyphMeterNavHost(
             )
         }
         composable(Routes.SETTINGS) {
-            settings { navController.popBackStack() }
+            settings({ navController.popBackStack() }, { navController.navigate(Routes.animation(it)) })
+        }
+        composable(Routes.ANIMATION) { entry ->
+            val presetId = entry.arguments?.getString(AnimationSettingsViewModel.PRESET_ID).orEmpty()
+            animation(presetId) { navController.popBackStack() }
         }
     }
 }

@@ -3,6 +3,7 @@ package com.swrneko.glyphmeter.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.charging.ChargingStateSource
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.model.GlyphFrameData
 import com.swrneko.glyphmeter.orchestration.PreviewRequestBus
@@ -14,6 +15,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -32,11 +34,16 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
+    chargingSource: ChargingStateSource,
     private val layout: DeviceLayout?,
     private val previewRequestBus: PreviewRequestBus,
 ) : ViewModel() {
 
     private val player = PresetPreviewPlayer(viewModelScope, nowMillis = { System.nanoTime() / 1_000_000 })
+
+    /** Battery level a fill to the charge level previews with; full until the first reading. */
+    private val level: StateFlow<Float> = chargingSource.state.map { it.level }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
 
     val state: StateFlow<SettingsUiState?> = combine(
         settingsRepository.settings,
@@ -70,7 +77,7 @@ class SettingsViewModel @Inject constructor(
         val current = state.value ?: return
         val layout = current.layout ?: return
         val preset = AnimationPresets.byId(presetId) ?: return
-        player.play(preset, layout, current.settings.brightness)
+        player.play(current.settings.frameSource(preset, layout, level.value))
         previewRequestBus.requestPreview(preset.id)
     }
 

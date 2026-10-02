@@ -19,29 +19,36 @@ object MeterRenderer {
 
     fun smooth(level: Float, layout: DeviceLayout, brightness: Int): GlyphFrameData {
         val segments = IntArray(layout.segmentCount)
-        val meter = layout.meterZone.indices
-        val clampedLevel = level.coerceIn(0f, 1f)
+        fillPath(segments, layout.meterZone.indices, level, brightness)
+        return GlyphFrameData(segments)
+    }
+
+    /**
+     * Lights the first [fraction] of [path] into [segments], the same way [smooth] lights the
+     * meter: whole segments at [brightness], the leading one in proportion to the remainder.
+     * Segments outside the lit part are left untouched.
+     */
+    fun fillPath(segments: IntArray, path: List<Int>, fraction: Float, brightness: Int) {
+        val clampedFraction = fraction.coerceIn(0f, 1f)
         val clampedBrightness = brightness.coerceIn(0, Light.MAX)
 
-        val exact = clampedLevel * meter.size
+        val exact = clampedFraction * path.size
         val wholeSegments = floor(exact).toInt()
         val remainder = exact - wholeSegments
 
         for (i in 0 until wholeSegments) {
-            segments[meter[i]] = clampedBrightness
+            segments[path[i]] = clampedBrightness
         }
 
         // A segment that has only just started filling still has to be visible, so the
         // partial value is mapped onto [MIN_VISIBLE, brightness] rather than onto
         // [0, brightness]. Without this the leading segment would be dark for the first
         // fifth of its range and the scale would look like it lags behind the battery.
-        if (wholeSegments < meter.size && remainder > 0f) {
+        if (wholeSegments < path.size && remainder > 0f) {
             val floorLight = minOf(Light.MIN_VISIBLE, clampedBrightness)
             val span = clampedBrightness - floorLight
-            segments[meter[wholeSegments]] = floorLight + (span * remainder).roundToInt()
+            segments[path[wholeSegments]] = floorLight + (span * remainder).roundToInt()
         }
-
-        return GlyphFrameData(segments)
     }
 
     /**

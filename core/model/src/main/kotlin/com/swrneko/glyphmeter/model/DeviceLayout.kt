@@ -21,6 +21,7 @@ data class DeviceLayout(
     val deviceId: String,
     val displayName: String,
     val segmentCount: Int,
+    /** Listed clockwise around the ring; sweeps and fills follow this order. */
     val zones: List<GlyphZone>,
     /** Zone used as the battery meter. */
     val meterZoneId: String,

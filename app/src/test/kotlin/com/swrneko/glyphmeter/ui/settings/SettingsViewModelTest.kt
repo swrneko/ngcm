@@ -1,6 +1,7 @@
 package com.swrneko.glyphmeter.ui.settings
 
 import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.charging.FakeChargingStateSource
 import com.swrneko.glyphmeter.layout.DeviceLayouts
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.orchestration.PreviewRequestBus
@@ -29,7 +30,12 @@ class SettingsViewModelTest {
     @After fun tearDown() = Dispatchers.resetMain()
 
     private fun viewModel(layout: DeviceLayout? = DeviceLayouts.PHONE_3A) =
-        SettingsViewModel(settingsRepository = settings, layout = layout, previewRequestBus = bus)
+        SettingsViewModel(
+            settingsRepository = settings,
+            chargingSource = FakeChargingStateSource(),
+            layout = layout,
+            previewRequestBus = bus,
+        )
 
     @Test
     fun previewing_a_preset_asks_the_service_to_play_exactly_that_preset() = runTest(UnconfinedTestDispatcher()) {

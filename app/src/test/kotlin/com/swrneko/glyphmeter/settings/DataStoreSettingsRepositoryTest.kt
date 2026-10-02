@@ -5,6 +5,12 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.swrneko.glyphmeter.animation.AnimationParams
+import com.swrneko.glyphmeter.animation.AnimationPresets
+import com.swrneko.glyphmeter.animation.FillStyle
+import com.swrneko.glyphmeter.animation.FillTarget
+import com.swrneko.glyphmeter.animation.SweepDirection
+import com.swrneko.glyphmeter.animation.defaultParams
 import com.swrneko.glyphmeter.model.Light
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -91,6 +97,17 @@ class DataStoreSettingsRepositoryTest {
             wirelessPresetId = "custom_wireless",
             fullPresetId = "custom_full",
             dimWhenFaceUp = true,
+            animationParams = mapOf(
+                "fill_up" to AnimationParams(
+                    cycleMillis = 2_500,
+                    repeats = 3,
+                    brightness = 1_500,
+                    zoneIds = setOf("C", "A"),
+                    fillTarget = FillTarget.CHARGE_LEVEL,
+                    fillStyle = FillStyle.STEPPED,
+                ),
+                "chase" to AnimationParams(cycleMillis = 800, direction = SweepDirection.COUNTER_CLOCKWISE),
+            ),
         )
 
         repository.update { original }
@@ -118,5 +135,46 @@ class DataStoreSettingsRepositoryTest {
         val repository = newRepository(dataStore)
 
         assertEquals(GlyphSettings.Default.meterMode, repository.settings.first().meterMode)
+    }
+
+    @Test
+    fun `animation numbers out of range are clamped on write`() = runTest {
+        val repository = newRepository()
+
+        repository.update {
+            it.copy(animationParams = mapOf("wave" to AnimationParams(cycleMillis = 1, repeats = 50, brightness = -3)))
+        }
+
+        val stored = repository.settings.first().animationParams.getValue("wave")
+        assertEquals(AnimationParams.MIN_CYCLE_MILLIS, stored.cycleMillis)
+        assertEquals(AnimationParams.MAX_REPEATS, stored.repeats)
+        assertEquals(0, stored.brightness)
+    }
+
+    @Test
+    fun `dropping an animation's entry resets it to the preset as shipped`() = runTest {
+        val repository = newRepository()
+        repository.update {
+            it.copy(animationParams = mapOf("flash" to AnimationParams(cycleMillis = 2_000, brightness = 900)))
+        }
+
+        repository.update { it.copy(animationParams = it.animationParams - "flash") }
+
+        val settings = repository.settings.first()
+        assertEquals(emptyMap<String, AnimationParams>(), settings.animationParams)
+        assertEquals(AnimationPresets.FLASH.defaultParams, settings.paramsFor(AnimationPresets.FLASH))
+    }
+
+    @Test
+    fun `an unknown persisted direction reads back as clockwise`() = runTest {
+        val dataStore = newDataStore()
+        dataStore.edit { preferences ->
+            preferences[androidx.datastore.preferences.core.longPreferencesKey("anim_wave_cycle_ms")] = 900L
+            preferences[stringPreferencesKey("anim_wave_direction")] = "SIDEWAYS"
+        }
+
+        val stored = newRepository(dataStore).settings.first().animationParams.getValue("wave")
+
+        assertEquals(AnimationParams(cycleMillis = 900), stored)
     }
 }

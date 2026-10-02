@@ -1,6 +1,7 @@
 package com.swrneko.glyphmeter.ui.settings
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -55,6 +57,7 @@ internal const val MAX_REPEAT_STEP_PERCENT = 25
 @Composable
 fun SettingsRoute(
     onBack: () -> Unit,
+    onOpenAnimation: (String) -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -74,6 +77,7 @@ fun SettingsRoute(
         onPresetSelected = viewModel::onPresetSelected,
         onPreviewPreset = viewModel::onPreviewPreset,
         onDimWhenFaceUpChange = viewModel::onDimWhenFaceUpChange,
+        onOpenAnimation = onOpenAnimation,
     )
 }
 
@@ -88,6 +92,7 @@ fun SettingsScreen(
     onPresetSelected: (PresetSlot, String) -> Unit,
     onPreviewPreset: (String) -> Unit,
     onDimWhenFaceUpChange: (Boolean) -> Unit,
+    onOpenAnimation: (String) -> Unit,
 ) {
     val settings = state.settings
     Scaffold(
@@ -145,13 +150,14 @@ fun SettingsScreen(
             PresetCard(PresetSlot.WIRED, R.string.settings_slot_wired, settings.wiredPresetId, onPresetSelected, onPreviewPreset)
             PresetCard(PresetSlot.WIRELESS, R.string.settings_slot_wireless, settings.wirelessPresetId, onPresetSelected, onPreviewPreset)
             PresetCard(PresetSlot.FULL, R.string.settings_slot_full, settings.fullPresetId, onPresetSelected, onPreviewPreset)
+            TuneAnimationsCard(customised = settings.animationParams.keys, onOpenAnimation = onOpenAnimation)
             FaceUpCard(settings.dimWhenFaceUp, onDimWhenFaceUpChange)
         }
     }
 }
 
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
+internal fun SettingsCard(content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -166,7 +172,7 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun LabeledSlider(
+internal fun LabeledSlider(
     label: String,
     formatValue: @Composable (Float) -> String,
     sliderValue: Float,
@@ -174,6 +180,7 @@ private fun LabeledSlider(
     enabled: Boolean,
     tag: String,
     onValueChange: (Float) -> Unit,
+    steps: Int = 0,
 ) {
     // Follow the finger locally and store only when the gesture ends: every stored change
     // restarts the settings flow and makes the orchestrator re-apply the Glyph.
@@ -188,6 +195,7 @@ private fun LabeledSlider(
             onValueChange = { dragValue = it },
             onValueChangeFinished = { onValueChange(dragValue) },
             valueRange = range,
+            steps = steps,
             enabled = enabled,
             modifier = Modifier.testTag(tag),
         )
@@ -252,7 +260,7 @@ private fun EventCard(
 }
 
 @StringRes
-private fun presetLabel(id: String): Int? = when (id) {
+internal fun presetLabel(id: String): Int? = when (id) {
     AnimationPresets.FILL_UP.id -> R.string.preset_fill_up
     AnimationPresets.WAVE.id -> R.string.preset_wave
     AnimationPresets.BREATHE.id -> R.string.preset_breathe
@@ -293,6 +301,46 @@ private fun PresetCard(
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.settings_preset_preview, name))
                     }
+                }
+            }
+        }
+    }
+}
+
+/** One row per animation, leading to its own settings screen. */
+@Composable
+private fun TuneAnimationsCard(customised: Set<String>, onOpenAnimation: (String) -> Unit) {
+    SettingsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.settings_tune_title), style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = stringResource(R.string.settings_tune_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Column {
+            for (preset in AnimationPresets.selectable) {
+                val name = presetLabel(preset.id)?.let { stringResource(it) } ?: preset.id
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenAnimation(preset.id) }
+                        .padding(vertical = 12.dp)
+                        .testTag("tune_${preset.id}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = stringResource(
+                                if (preset.id in customised) R.string.settings_tune_customised else R.string.settings_tune_default,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
                 }
             }
         }

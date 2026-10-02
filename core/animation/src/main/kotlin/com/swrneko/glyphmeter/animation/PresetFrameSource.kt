@@ -1,5 +1,6 @@
 package com.swrneko.glyphmeter.animation
 
+import com.swrneko.glyphmeter.layout.MeterRenderer
 import com.swrneko.glyphmeter.model.DeviceLayout
 import com.swrneko.glyphmeter.model.GlyphFrameData
 import com.swrneko.glyphmeter.model.Light
@@ -12,37 +13,56 @@ import kotlin.math.sin
 /**
  * Renders an [AnimationPreset] into frames.
  *
- * One renderer for all presets, because a preset is data. Every preset ends fully dark
- * so the meter can take over without a visible seam.
+ * One renderer for all presets, because a preset is data. [params] tune the speed, repeats,
+ * brightness, zones, direction and fill; [brightness] is used when [params] has no brightness of
+ * its own. Every preset ends fully dark so the meter can take over without a visible seam, except
+ * a fill to the charge level: it ends on exactly the frame the meter shows for [chargeLevel], and
+ * reports that level as [handoffLevel].
  */
 class PresetFrameSource(
     private val preset: AnimationPreset,
     private val layout: DeviceLayout,
-    private val brightness: Int,
+    brightness: Int,
+    params: AnimationParams = preset.defaultParams,
+    chargeLevel: Float = 1f,
 ) : FrameSource {
 
-    override val durationMillis: Long get() = preset.durationMillis
+    private val params: AnimationParams = params.normalized()
+    private val cycleMillis: Long = this.params.cycleMillis
+    private val peak: Int = (this.params.brightness ?: brightness).coerceIn(0, Light.MAX)
 
-    /** Segment order used by sweeps: the meter zone first, then the remaining zones. */
-    private val sweepOrder: List<Int> = buildList {
-        addAll(layout.meterZone.indices)
-        for (zone in layout.zones) {
-            if (zone.id != layout.meterZoneId) addAll(zone.indices)
-        }
+    /** The meter's brightness, which a fill to the charge level ends on. */
+    private val meterBrightness: Int = brightness.coerceIn(0, Light.MAX)
+
+    override val durationMillis: Long = cycleMillis * this.params.repeats
+
+    /** Battery level the last frame shows on the meter, or null when the animation ends dark. */
+    val handoffLevel: Float? =
+        if (preset.hasFill && this.params.fillTarget == FillTarget.CHARGE_LEVEL) chargeLevel.coerceIn(0f, 1f) else null
+
+    /** Lit zones in clockwise order around the ring, which is the order of `DeviceLayout.zones`. */
+    private val zones = preset.zonesFor(this.params, layout)
+
+    /** Segment order used by sweeps and fills, in the chosen direction. */
+    private val sweepOrder: List<Int> = zones.flatMap { it.indices }.let { clockwise ->
+        if (this.params.direction == SweepDirection.COUNTER_CLOCKWISE && preset.hasDirection) clockwise.reversed() else clockwise
     }
 
-    override fun frameAt(elapsedMillis: Long): GlyphFrameData {
-        if (elapsedMillis >= durationMillis) return GlyphFrameData.off(layout.segmentCount)
+    private val litIndices: List<Int> = zones.flatMap { it.indices }
 
-        val t = when {
-            durationMillis <= 0L -> 1f
-            else -> (elapsedMillis.toFloat() / durationMillis).coerceIn(0f, 1f)
+    override fun frameAt(elapsedMillis: Long): GlyphFrameData {
+        if (elapsedMillis >= durationMillis) {
+            if (handoffLevel == null) return GlyphFrameData.off(layout.segmentCount)
+            return GlyphFrameData(IntArray(layout.segmentCount).also { renderFillUp(it, t = 1f, lastRun = true) })
         }
+
+        val run = (elapsedMillis / cycleMillis).toInt()
+        val t = ((elapsedMillis % cycleMillis).toFloat() / cycleMillis).coerceIn(0f, 1f)
+        val lastRun = run == params.repeats - 1
         val segments = IntArray(layout.segmentCount)
-        val peak = brightness.coerceIn(0, Light.MAX)
 
         when (preset.kind) {
-            PresetKind.FILL_UP -> renderFillUp(segments, t, peak)
+            PresetKind.FILL_UP -> renderFillUp(segments, t, lastRun)
             PresetKind.WAVE -> renderSweep(segments, t, peak, bandWidth = 5f, passes = 1)
             PresetKind.BREATHE -> renderBreathe(segments, t, peak)
             PresetKind.CHASE -> renderSweep(segments, t, peak, bandWidth = 2f, passes = 2)
@@ -53,18 +73,39 @@ class PresetFrameSource(
         return GlyphFrameData(segments)
     }
 
-    /** Fills the meter zone over the first 70 percent, then fades the whole thing out. */
-    private fun renderFillUp(segments: IntArray, t: Float, peak: Int) {
-        val meter = layout.meterZone.indices
-        val fillPhase = 0.7f
+    /**
+     * Fills over the first 70 percent of a run, then fades out. A fill to the charge level runs
+     * along the meter only, and its last run holds the meter frame instead of fading.
+     */
+    private fun renderFillUp(segments: IntArray, t: Float, lastRun: Boolean) {
+        // A fill to the charge level has the meter as its only zone, so this is the meter then.
+        val path = sweepOrder
+        val target = handoffLevel ?: 1f
 
-        if (t <= fillPhase) {
-            val filled = (t / fillPhase * meter.size).toInt().coerceAtMost(meter.size)
-            for (i in 0 until filled) segments[meter[i]] = peak
-        } else {
-            val fade = 1f - (t - fillPhase) / (1f - fillPhase)
-            val level = (peak * fade).roundToInt().coerceAtLeast(0)
-            for (index in meter) segments[index] = level
+        when {
+            t <= FILL_PHASE -> fill(segments, path, t / FILL_PHASE * target)
+            handoffLevel != null && lastRun -> {
+                // The hold eases from the animation's own brightness and from a stepped fill
+                // into the exact meter frame, so the meter that follows starts without a jump.
+                val progress = ((t - FILL_PHASE) / (1f - FILL_PHASE)).coerceIn(0f, 1f)
+                val light = peak + ((meterBrightness - peak) * progress).roundToInt()
+                MeterRenderer.fillPath(segments, path, target, light)
+            }
+            else -> {
+                fill(segments, path, target)
+                val fade = (1f - (t - FILL_PHASE) / (1f - FILL_PHASE)).coerceIn(0f, 1f)
+                for (index in path) segments[index] = (segments[index] * fade).roundToInt()
+            }
+        }
+    }
+
+    private fun fill(segments: IntArray, path: List<Int>, fraction: Float) {
+        when (params.fillStyle) {
+            FillStyle.SMOOTH -> MeterRenderer.fillPath(segments, path, fraction, peak)
+            FillStyle.STEPPED -> {
+                val whole = (fraction.coerceIn(0f, 1f) * path.size).toInt().coerceAtMost(path.size)
+                for (i in 0 until whole) segments[path[i]] = peak
+            }
         }
     }
 
@@ -84,10 +125,10 @@ class PresetFrameSource(
         }
     }
 
-    /** One half sine over the full duration, applied to every segment at once. */
+    /** One half sine over a run, applied to every segment at once. */
     private fun renderBreathe(segments: IntArray, t: Float, peak: Int) {
         val level = (peak * sin(t * PI).toFloat()).roundToInt().coerceIn(0, peak)
-        segments.fill(level)
+        for (index in litIndices) segments[index] = level
     }
 
     /**
@@ -112,12 +153,17 @@ class PresetFrameSource(
         }
 
         val level = (peak * factor).roundToInt().coerceIn(0, peak)
-        segments.fill(level)
+        for (index in litIndices) segments[index] = level
     }
 
     /** Linear fade from full to dark. */
     private fun renderFadeOut(segments: IntArray, t: Float, peak: Int) {
         val level = (peak * (1f - t)).roundToInt().coerceIn(0, peak)
         segments.fill(level)
+    }
+
+    private companion object {
+        /** Share of a fill run spent filling; the rest fades out or holds. */
+        const val FILL_PHASE = 0.7f
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import com.swrneko.glyphmeter.animation.AnimationParams
 import com.swrneko.glyphmeter.model.Light
 import com.swrneko.glyphmeter.settings.GlyphSettings
 import com.swrneko.glyphmeter.settings.MeterMode
@@ -39,6 +40,7 @@ class SettingsScreenTest {
         onPresetSelected: (PresetSlot, String) -> Unit = { _, _ -> },
         onPreviewPreset: (String) -> Unit = {},
         onDimWhenFaceUpChange: (Boolean) -> Unit = {},
+        onOpenAnimation: (String) -> Unit = {},
         glyphPreviewAvailable: Boolean = true,
     ) {
         compose.setContent {
@@ -56,6 +58,7 @@ class SettingsScreenTest {
                 onPresetSelected = onPresetSelected,
                 onPreviewPreset = onPreviewPreset,
                 onDimWhenFaceUpChange = onDimWhenFaceUpChange,
+                onOpenAnimation = onOpenAnimation,
             )
         }
     }
@@ -217,5 +220,27 @@ class SettingsScreenTest {
         compose.onNodeWithTag("face_up_switch").performScrollTo().assertIsOn().performClick()
 
         assertEquals(false, reported)
+    }
+
+    @Test
+    fun tapping_an_animation_opens_its_settings() {
+        var opened: String? = null
+        show(onOpenAnimation = { opened = it })
+
+        compose.onNodeWithTag("tune_chase").performScrollTo().performClick()
+
+        assertEquals("chase", opened)
+    }
+
+    @Test
+    fun a_tuned_animation_is_marked_as_customised() {
+        show(
+            GlyphSettings.Default.copy(
+                animationParams = mapOf("wave" to AnimationParams(cycleMillis = 2_000)),
+            ),
+        )
+
+        compose.onNodeWithTag("tune_wave").performScrollTo()
+        compose.onNodeWithText("Customised").assertExists()
     }
 }

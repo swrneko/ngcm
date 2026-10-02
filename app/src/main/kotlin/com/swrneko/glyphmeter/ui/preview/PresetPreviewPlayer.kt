@@ -1,8 +1,6 @@
 package com.swrneko.glyphmeter.ui.preview
 
-import com.swrneko.glyphmeter.animation.AnimationPreset
-import com.swrneko.glyphmeter.animation.PresetFrameSource
-import com.swrneko.glyphmeter.model.DeviceLayout
+import com.swrneko.glyphmeter.animation.FrameSource
 import com.swrneko.glyphmeter.model.GlyphFrameData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -13,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Plays an animation preset on the on-screen preview only; it never touches the hardware.
+ * Plays an animation on the on-screen preview only; it never touches the hardware.
  *
  * [frame] is null while nothing is playing.
  */
@@ -27,10 +25,9 @@ class PresetPreviewPlayer(
 
     private var job: Job? = null
 
-    /** Starts [preset], replacing any animation that is still running. */
-    fun play(preset: AnimationPreset, layout: DeviceLayout, brightness: Int) {
+    /** Starts [source], replacing any animation that is still running. */
+    fun play(source: FrameSource) {
         job?.cancel()
-        val source = PresetFrameSource(preset, layout, brightness)
         job = scope.launch {
             val start = nowMillis()
             try {

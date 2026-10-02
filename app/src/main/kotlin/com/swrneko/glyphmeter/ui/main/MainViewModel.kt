@@ -136,7 +136,7 @@ class MainViewModel @Inject constructor(
         val current = state.value ?: return
         val layout = current.layout ?: return
         val preset = AnimationPresets.byId(current.settings.wiredPresetId) ?: AnimationPresets.FILL_UP
-        player.play(preset, layout, current.settings.brightness)
+        player.play(current.settings.frameSource(preset, layout, current.level))
         previewRequestBus.requestPreview(preset.id)
     }
 }

@@ -42,7 +42,7 @@ Android-приложение: показ уровня заряда на Glyph-и
 
 - `:core:model` — модели данных: `Light`, `DeviceLayout`, `GlyphZone`, `GlyphFrameData`. Чистая JVM.
 - `:core:layout` — таблица раскладок устройств (`DeviceLayouts`, сейчас Phone (3a), `hardwareVerified = false` до проверки на устройстве) и `MeterRenderer` (плавный кадр уровня и единственный расчёт процента для ступенчатого запасного режима, `steppedPercent`). Чистая JVM.
-- `:core:animation` — пресеты подключения, кривые, `MeterTransition`, `PresetFrameSource`; время приходит параметром. Чистая JVM.
+- `:core:animation` — пресеты подключения и их параметры (`AnimationParams`: длительность, повторы, яркость, зоны, направление, заполнение), кривые, `MeterTransition`, `PresetFrameSource`; время приходит параметром. Чистая JVM.
 - `:core:hardware` — `GlyphDisplay`, `NothingGlyphDisplay`, `FakeGlyphDisplay`, определение устройства. Единственный, кто знает `com.nothing.ketchum`; SDK как `compileOnly`.
 - `:app` — пакет `com.swrneko.glyphmeter`:
   - `access` — состояния доступа к Glyph, debug-режим, политики запуска, writer'ы (secure settings, Shizuku);
@@ -50,9 +50,9 @@ Android-приложение: показ уровня заряда на Glyph-и
   - `orientation` — источник «телефон лежит экраном вверх» (датчик и фейк), активен только во время зарядки;
   - `orchestration` — `GlyphOrchestrator`, сценарии показа, `PreviewRequestBus` (запросы превью пресета от интерфейса; единственный потребитель — оркестратор);
   - `service` — foreground-сервис (`specialUse`), `BootReceiver`, контроллер сервиса;
-  - `settings` — `GlyphSettings` и репозиторий на DataStore;
+  - `settings` — `GlyphSettings` (в том числе параметры каждой анимации) и репозиторий на DataStore;
   - `di` — Hilt-модули, `@GlyphDispatcher`;
-  - `ui` — навигация, главный экран, настройки, онбординг, превью глифа, тема.
+  - `ui` — навигация, главный экран, настройки, настройка отдельной анимации (`ui/animation`), онбординг, превью глифа, тема.
 
 ## Зависимости модулей
 
