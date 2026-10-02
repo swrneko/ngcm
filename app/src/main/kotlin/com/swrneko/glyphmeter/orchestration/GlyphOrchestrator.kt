@@ -48,6 +48,9 @@ val DEFAULT_RECONNECT_DELAYS_MILLIS: List<Long> = listOf(1_000L, 2_000L, 4_000L,
 /** A session that survives this long counts as recovered, and the next loss gets a fresh budget. */
 private const val STABLE_SESSION_MILLIS = 60_000L
 
+/** How long a dark, idle session is kept before it is let go; a quick replug reuses it. */
+private const val IDLE_RELEASE_MILLIS = 2_000L
+
 /**
  * Decides what the Glyph shows and when.
  *
@@ -69,6 +72,12 @@ private const val STABLE_SESSION_MILLIS = 60_000L
  * phone lies screen up. Orientation is collected only while charging with that setting on, so
  * the sensor behind it never runs otherwise.
  *
+ * The Glyph session is held only while something is shown. An open session keeps Nothing's own
+ * Glyph features, such as the Essential notification light, from lighting up, so once the glyph
+ * has gone dark and stayed idle for [idleReleaseMillis] the session is closed, and the next show
+ * opens it again (re-arming access first). An always-on meter holds it for the whole charge.
+ * The first connect in [run] stays: it is what tells the user early that access is missing.
+ *
  * [previewRequests] carries preset ids the user asked to see on the Glyph. They are handled in
  * the same sequence as battery and settings events, so the UI never writes to the display. A
  * preview is an explicit action: it is not suppressed by [GlyphSettings.dimWhenFaceUp] and plays
@@ -87,6 +96,7 @@ class GlyphOrchestrator(
     private val previewRequests: Flow<String> = emptyFlow(),
     private val reconnectDelaysMillis: List<Long> = DEFAULT_RECONNECT_DELAYS_MILLIS,
     private val stableSessionMillis: Long = STABLE_SESSION_MILLIS,
+    private val idleReleaseMillis: Long = IDLE_RELEASE_MILLIS,
     private val frameIntervalMillis: Long = 16,
 ) {
 
@@ -115,11 +125,19 @@ class GlyphOrchestrator(
     /** Frame the always-on refresher re-sends; null whenever something else owns the display. */
     private var heldFrame: GlyphFrameData? = null
 
+    /** Scope of [run]; idle releases are launched in it. */
+    private lateinit var sessionScope: CoroutineScope
+
+    /** Pending close of an idle session; cancelled as soon as something is to be shown. */
+    private var releaseJob: Job? = null
+
     suspend fun run() {
         rearm()
         display.connect(layout).onFailure { return }
 
         coroutineScope {
+            sessionScope = this
+            scheduleRelease()
             val refresher = launch { refreshHeldFrame() }
             val observer = launch {
                 try {
@@ -133,6 +151,7 @@ class GlyphOrchestrator(
             keepConnected()
             observer.cancelAndJoin()
             refresher.cancelAndJoin()
+            releaseJob?.cancel()
         }
     }
 
@@ -141,6 +160,8 @@ class GlyphOrchestrator(
         while (true) {
             display.capability.first { it == RenderCapability.UNAVAILABLE }
             if (!reconnect()) return
+            // Nothing may need the session the reconnect brought back.
+            scheduleRelease()
         }
     }
 
@@ -295,8 +316,9 @@ class GlyphOrchestrator(
             lastTriggerLevel = charging.level
             // Plugging in at 100% already plays the full-charge preset (see presetFor).
             fullPlayed = charging.level >= 1f
-            startShow(scope) {
-                rearm()
+            startShow(scope) { opened ->
+                // Every plug-in re-arms access once; opening the session has done it already.
+                if (!opened) rearm()
                 playThenHandOver(settings.frameSource(presetFor(charging, settings), layout, charging.level))
                 showMeter(charging, settings)
             }
@@ -341,8 +363,40 @@ class GlyphOrchestrator(
         showJob = null
     }
 
-    private fun startShow(scope: CoroutineScope, block: suspend () -> Unit) {
-        showJob = scope.launch { block() }
+    /**
+     * Starts a show once the session is open; a session that will not open skips the show.
+     * [block] learns whether the session had to be opened for it, which re-armed access already.
+     */
+    private fun startShow(scope: CoroutineScope, block: suspend (opened: Boolean) -> Unit) {
+        releaseJob?.cancel()
+        releaseJob = null
+        showJob = scope.launch {
+            val wasOpen = isOpen()
+            if (ensureConnected()) block(!wasOpen)
+        }
+    }
+
+    private fun isOpen(): Boolean =
+        display.capability.value.let { it == RenderCapability.PER_SEGMENT || it == RenderCapability.STEPPED_ONLY }
+
+    /**
+     * Opens the session for a show unless it is already open. A refused connect is left to
+     * [keepConnected], which sees [RenderCapability.UNAVAILABLE] and spends the bounded attempts.
+     */
+    private suspend fun ensureConnected(): Boolean {
+        if (isOpen()) return true
+        rearm()
+        return display.connect(layout).isSuccess
+    }
+
+    /** Closes the session after [idleReleaseMillis], unless something is shown by then. */
+    private fun scheduleRelease() {
+        releaseJob?.cancel()
+        releaseJob = sessionScope.launch {
+            delay(idleReleaseMillis)
+            val busy = heldFrame != null || showJob?.isActive == true
+            if (!busy) display.disconnect()
+        }
     }
 
     /** Animates the meter to [charging]'s level, then holds or fades depending on the mode. */
@@ -397,6 +451,7 @@ class GlyphOrchestrator(
 
     private fun stop() {
         display.turnOff()
+        scheduleRelease()
     }
 
     private suspend fun rearm() {

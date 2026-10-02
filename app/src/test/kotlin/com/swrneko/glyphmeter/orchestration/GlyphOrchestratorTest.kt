@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -51,8 +52,11 @@ class GlyphOrchestratorTest {
         previewRequests = previews.requests,
         reconnectDelaysMillis = reconnectDelays,
         stableSessionMillis = stableSession,
+        idleReleaseMillis = idleRelease,
         frameIntervalMillis = 16,
     )
+
+    private val idleRelease = 2_000L
 
     private val reconnectDelays = listOf(100L, 200L, 400L)
     private val stableSession = 1_000L
@@ -1032,6 +1036,189 @@ class GlyphOrchestratorTest {
         val tuned = initial.frameSource(AnimationPresets.BREATHE, layout, 0.5f)
         assertEquals((0 until 60).map { tuned.frameAt(it * 16L) }, display.rendered.take(60))
         assertEquals("at its own brightness", 1_200, display.rendered.maxOf { it.segments.max() })
+
+        job.cancelAndJoin()
+    }
+
+    // ---- releasing the session while idle ----
+    // An open session keeps Nothing's own Glyph features (Essential notification lights) dark,
+    // so the session is held only while something is shown.
+
+    @Test
+    fun `an idle phone does not keep the session open`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository()).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        runCurrent()
+        assertTrue("the first connect still checks access", display.isConnected)
+
+        advanceTimeBy(idleRelease + 1)
+        runCurrent()
+
+        assertFalse(display.isConnected)
+        assertTrue("an idle orchestrator keeps running", job.isActive)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `on event the session is released once the meter has faded`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ON_EVENT, showDurationMillis = 2_000))
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(idleRelease + 1)
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue("plugging in opens the session again", display.isConnected)
+        assertTrue(display.rendered.isNotEmpty())
+
+        advanceTimeBy(20_000)
+        runCurrent()
+
+        assertFalse("after the fade the session is let go", display.isConnected)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `an always on meter holds the session until unplugged`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON))
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertTrue(display.isConnected)
+
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(5_000 + idleRelease)
+        runCurrent()
+
+        assertFalse(display.isConnected)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a replug inside the grace period reuses the session`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON))
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(5_000)
+        runCurrent()
+        val connects = display.connectCount
+
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(1_000)
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertEquals(connects, display.connectCount)
+        assertTrue(display.isConnected)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a preview on an idle phone opens the session and lets it go afterwards`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val bus = PreviewRequestBus()
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(), previews = bus).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(idleRelease + 1)
+        runCurrent()
+        assertFalse(display.isConnected)
+
+        bus.requestPreview(AnimationPresets.FLASH.id)
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+        assertTrue(display.isConnected)
+        assertTrue("the preview is drawn", display.rendered.isNotEmpty())
+
+        advanceTimeBy(AnimationPresets.FLASH.durationMillis + idleRelease + 100)
+        runCurrent()
+        assertFalse(display.isConnected)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `access is re armed before opening the session for a show`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        var rearms = 0
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository(), rearmAccess = { rearms++ }).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(idleRelease + 1)
+        runCurrent()
+        val before = rearms
+
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        runCurrent()
+
+        assertTrue(rearms > before)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `a show that cannot open the session runs out of attempts and the run ends`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val job = launch { orchestrator(display, charging, FakeSettingsRepository()).run() }
+        runCurrent()
+        charging.emit(isCharging = false, level = 0.5f, source = PowerSource.NONE)
+        advanceTimeBy(idleRelease + 1)
+        runCurrent()
+
+        display.connectResult = Result.failure(IllegalStateException("revoked"))
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(reconnectDelays.sum() + 100)
+        runCurrent()
+
+        assertTrue("a Glyph that stopped answering must not leave a zombie service", job.isCompleted)
+    }
+
+    @Test
+    fun `a session brought back under an always on meter is kept`() = runTest {
+        val display = FakeGlyphDisplay()
+        val charging = FakeChargingStateSource()
+        val settings = FakeSettingsRepository(GlyphSettings.Default.copy(meterMode = MeterMode.ALWAYS_ON))
+        val job = launch { orchestrator(display, charging, settings).run() }
+        runCurrent()
+        charging.emit(isCharging = true, level = 0.5f, source = PowerSource.WIRED)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        display.loseConnection()
+        advanceTimeBy(reconnectDelays.first() + stableSession + idleRelease + 1_000)
+        runCurrent()
+        display.clearRendered()
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertTrue("the meter still owns the session", display.isConnected)
+        assertTrue(display.rendered.isNotEmpty())
 
         job.cancelAndJoin()
     }
